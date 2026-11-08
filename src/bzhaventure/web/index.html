@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrédicTrail · par BZHAventure</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+<header>
+  <div class="brand-banner">
+  <img class="brand-logo" src="/assets/logo-bzhaventure.png" alt="Logo BZHAventure" width="100" height="100">
+  <div>
+  <div class="eyebrow">PrédicTrail · par BZHAventure</div>
+  <p id="runtime-info" class="runtime-info">Version Python : chargement…</p>
+  <h1>PrédicTrail</h1>
+  <p>Estimez vos temps de passage à partir de vos courses précédentes.</p>
+  </div>
+  </div>
+</header>
+<nav class="screen-tabs no-print" aria-label="Écrans de l’application">
+  <button class="button" id="tab-analysis" aria-current="page"><span aria-hidden="true">⌁</span> Analyse d’un parcours</button>
+  <button class="button" id="tab-references"><span aria-hidden="true">▤</span> Courses de référence et modèle prédictif</button>
+  <button class="button" id="tab-map">Carte des références</button>
+  <button class="button" id="tab-simulations">Simulation et comparaison de runs</button>
+<button class="button" id="tab-conversion">⇄ Conversion GPX</button>
+<button class="button" id="tour-open">ⓘ Découvrir les fonctionnalités</button>
+<button class="button" id="tab-backups">⇩ Sauvegarde et restauration</button>
+</nav>
+<main>
+<section id="screen-backups" hidden aria-labelledby="backups-title"><h2 id="backups-title">Sauvegarder et restaurer mes données</h2>
+<p>Archive complète : GPX de référence et parcours conservés, imports Garmin, sélections, modèles, scénarios et réglages. Les mots de passe et sessions Garmin ne sont pas sauvegardés. Conservez une copie du ZIP sur un autre support.</p>
+<div class="controls"><button id="backup-create" class="button">Créer une sauvegarde complète</button><button id="backup-select" class="button">Sélectionner une sauvegarde ZIP</button><input id="backup-file" type="file" accept=".zip,application/zip" hidden><button id="backup-restore" class="button" disabled>Restaurer les données</button><button id="resume-analysis" class="button">Reprendre le dernier parcours</button></div>
+<p>La restauration remplace les données locales après vérification et crée d’abord une sauvegarde de sécurité. La reconstruction des modèles est suivie dans le panneau de démarrage.</p>
+<p id="backup-status" role="status"></p><div id="backup-download"></div><p id="backup-preview"></p><h3>Copies locales disponibles</h3><p>Une copie automatique est créée au premier démarrage réussi de chaque journée. Les archives restent locales : copiez-en une sur un disque externe. Aucune archive n’est effacée automatiquement.</p><button id="backup-refresh" class="button">Actualiser les sauvegardes</button><div id="backup-history"></div>
+</section>
+<section id="screen-conversion" hidden aria-labelledby="conversion-title"><h2 id="conversion-title">Conversion et inspection des GPX</h2>  <details class="no-print" open>
+    <summary>Conversion et optimisation des imports GPX manuels</summary>
+    <label for="gpx-conversion">Traitement à chaque import
+      <select id="gpx-conversion">
+        <option value="compact">Compacter · conserver toutes les données</option>
+        <option value="simulation">Alléger pour le simulateur · retirer les extensions des capteurs</option>
+        <option value="original">Contrôler uniquement · garder le fichier original</option>
+      </select>
+    </label>
+    <p class="muted">Source jusqu’à 100 Mio ; résultat limité à 20 Mio. Aucun point supprimé : coordonnées, altitudes, horaires et segments conservés. Le mode allégé retire notamment fréquence cardiaque, cadence et température. Les originaux sur disque restent intacts. Les horaires manquants ne sont pas inventés.</p>
+    <button class="button" id="convert-gpx-files" type="button">Contrôler / convertir des GPX</button>
+    <input id="conversion-files" type="file" accept=".gpx,application/gpx+xml" multiple hidden>
+    <div id="gpx-import-reports" role="status" aria-live="polite"></div>
+  </details><h3>Fichier source avant conversion</h3><div id="conversion-source-info" class="metrics"></div><div id="conversion-preview"></div></section>
+
+  <section id="screen-analysis" aria-labelledby="upload-title">
+    <div id="startup-panel" role="status" aria-live="polite">
+      <h2>Démarrage de l’application</h2>
+      <progress id="startup-progress" max="100" value="0" aria-label="Avancement du démarrage"></progress>
+      <p id="startup-message">Connexion au serveur…</p>
+      <small id="startup-detail"></small>
+      <p id="startup-watchdog" role="status"></p>
+      <button class="button" id="retry-validation" type="button" hidden>Relancer la validation</button>
+    </div>
+    <div class="heading">
+      <div><h2 id="upload-title">Analyser un parcours</h2><p class="muted">Trace GPX avec altitudes · jusqu’à 100 Mio avant conversion</p></div>
+      <button class="button" id="select" disabled><span aria-hidden="true">📂</span> Choisir un fichier GPX</button>
+      <input type="file" id="file" accept=".gpx,application/gpx+xml" hidden>
+    </div>
+    <div class="spacing">
+      <label for="prediction-mode">Méthode de calcul</label>
+      <select id="prediction-mode">
+        <option value="model">Modèle appris des références</option>
+        <option value="total">Durée totale saisie</option>
+        <option value="pace">Allure saisie en min/km</option>
+      </select>
+    </div>
+    <div class="spacing" id="manual-total-fields" hidden>
+      <label for="manual-total">Temps total prévu · heures:minutes:secondes</label>
+      <input id="manual-total" type="text" placeholder="24:00:00" inputmode="numeric">
+    </div>
+    <div class="spacing" id="manual-pace-fields" hidden>
+      <label for="manual-pace">Allure prévue · minutes:secondes par km</label>
+      <input id="manual-pace" type="text" placeholder="06:30" inputmode="numeric">
+    </div>
+    <fieldset id="analysis-strategy-fields"><legend>Stratégie d’allure du parcours</legend>
+      <div class="filter-grid">
+        <label>Évolution de la durée (%)<input id="analysis-adjustment" type="number" min="-50" max="100" step="1" value="0"></label>
+        <label>Répartition de l’allure<select id="analysis-split"><option value="even">Régulière</option><option value="positive">Split positif · première moitié plus rapide</option><option value="negative">Split négatif · deuxième moitié plus rapide</option></select></label>
+        <label>Intensité du split (%)<input id="analysis-split-percent" type="number" min="0" max="40" step="1" value="10"></label>
+        <label>Évolution du temps en montée (%)<input id="analysis-climb" type="number" min="-50" max="100" step="1" value="0"></label>
+      </div>
+      <p class="muted">−10 % : durée réduite de 10 % (plus rapide) ; +10 % : durée augmentée de 10 % (plus lent). Le split agit sur les deux moitiés de distance et conserve à lui seul la durée totale. Le réglage des montées agit ensuite sur les portions de pente &gt; +3 %. Cliquez sur Calculer le parcours pour appliquer ces réglages.</p>
+    </fieldset>
+    <p id="analysis-strategy-help" class="muted">Ces réglages s’appliquent au modèle appris, à la durée totale saisie ou à l’allure saisie. Le résultat ajusté peut ensuite être ajouté à la comparaison depuis la page Simulation.</p>
+    <div class="controls">
+      <button class="button" id="calculate-route" type="button" disabled><span aria-hidden="true">▶</span> Calculer le parcours</button>
+    </div>
+    <div class="spacing">
+      <label for="spacing">Espacement des repères · <output id="spacing-value" for="spacing">5 km</output></label>
+      <input type="range" id="spacing" min="1" max="50" step="1" value="5">
+    </div>
+    <div class="spacing" id="model-fields">
+      <label for="prediction-model">Modèle pour l’analyse du parcours</label>
+      <select id="prediction-model" disabled>
+        <option value="auto">Sélection automatique selon le parcours</option>
+        <option value="global">Modèle global · toutes les références</option>
+        <option value="inclination">Test · classes d’inclinaison en montée et descente</option>
+      </select>
+      <small>Le choix d’un groupe applique sa courbe candidate et son échantillonnage.</small>
+    </div>
+    <div class="spacing">
+      <label for="departure">Date et heure de départ</label>
+      <input type="datetime-local" id="departure" step="60" aria-describedby="departure-zone">
+      <small id="departure-zone"></small>
+      <button class="button" id="recalculate" type="button" disabled><span aria-hidden="true">◷</span> Recalculer les horaires</button>
+    </div>
+    <details class="no-print" id="waypoint-config">
+      <summary>Points de passage personnalisés</summary>
+      <div class="controls">
+        <label for="waypoint-km">Distance depuis le départ (km)
+          <input id="waypoint-km" type="number" min="0" step="0.001">
+        </label>
+        <label for="waypoint-comment">Commentaire
+          <input id="waypoint-comment" type="text" maxlength="500" placeholder="Ravitaillement en eau">
+        </label>
+        <button class="button" id="add-waypoint" type="button">Ajouter le point</button>
+      </div>
+      <div class="scroll"><table><thead><tr><th>Km</th><th>Commentaire</th><th>Action</th></tr></thead><tbody id="waypoint-list"></tbody></table></div>
+    </details>
+    <p id="status" role="status">Sélectionnez une trace pour afficher la carte et les temps estimés.</p>
+    <div id="result" hidden>
+      <h3 id="filename"></h3>
+      <p id="file-info" class="file-info"></p>
+      <p id="departure-summary" class="file-info"></p>
+      <p id="print-info" class="print-only"></p>
+      <div class="metrics" id="result-metrics"></div>
+      <p id="model-choice-summary" class="file-info"></p>
+      <p id="analysis-strategy-summary" class="muted"></p>
+      <p id="pause-info" class="muted notice"></p>
+      <div id="prediction-segmentation" class="notice"></div>
+      <details>
+        <summary>Modèle utilisé pour ce parcours</summary>
+        <figure id="prediction-model-chart"></figure>
+        <p id="prediction-model-info" class="muted"></p>
+      </details>
+      <div class="map-panel" id="map-panel">
+      <div class="controls">
+        <label for="color-mode">Coloration du parcours
+          <select id="color-mode"><option value="grade">Dénivelé · pente (%)</option><option value="elevation">Altitude (m)</option><option value="speed">Vitesse prédite (km/h)</option></select>
+        </label>
+        <button class="button" id="fullscreen" type="button"><span aria-hidden="true">⛶</span> Carte en plein écran</button>
+        <button class="button" id="export-gpx" type="button"><span aria-hidden="true">⇩</span> Exporter le parcours GPX</button>
+        <button class="button" id="print" type="button"><span aria-hidden="true">▣</span> Imprimer la prédiction</button>
+      </div>
+      <div class="legend"><span id="color-low"></span><span class="ramp" aria-hidden="true"></span><span id="color-high"></span></div>
+      <div id="map" aria-label="Carte du parcours"></div>
+      <div class="controls">
+        <button class="button" id="play" type="button"><span aria-hidden="true">▶</span> Lire la trace</button>
+        <label for="play-speed">Vitesse de lecture
+          <input id="play-speed" type="range" min="60" max="7200" step="60" value="600">
+          <output id="play-speed-value" for="play-speed">×600</output>
+        </label>
+      </div>
+      <label for="progress">Position dans le parcours</label>
+      <input id="progress" type="range" min="0" max="1000" step="1" value="0">
+      <p id="play-position" role="status"></p>
+      <small>À ×600, une seconde de lecture représente dix minutes de course estimée.</small>
+      </div>
+      <figure id="result-profile"></figure>
+      <div id="result-terrain" class="scroll"></div>
+      <div class="scroll">
+        <table><caption id="marks-caption">Passages estimés depuis le départ</caption>
+        <thead><tr><th>Repère</th><th>Distance</th><th>Temps cumulé</th><th>Date et heure de passage</th><th>Altitude</th><th>Profil depuis le repère précédent</th><th>Pauses cumulées estimées</th></tr></thead><tbody id="marks"></tbody></table>
+      </div>
+      <p class="muted notice">Le profil dominant correspond au terrain couvrant la plus grande distance entre deux repères. Montée au-dessus de +3 %, descente sous −3 %, plat entre les deux.</p>
+    </div>
+  </section>
+  <section class="screen-references" hidden aria-labelledby="reference-title">
+    <h2 id="reference-title">Courses de référence</h2>
+    <p class="muted">Classement séparé par profil de dénivelé et classe de distance. L’estimation de classement utilise uniquement les autres courses du même groupe.</p>
+    <div class="controls"><label for="reference-sort">Classement
+      <select id="reference-sort"><option value="performance">Performance · allure par km-effort</option><option value="fit">Proximité du modèle · erreur absolue</option><option value="name">Nom</option><option value="distance">Distance</option></select>
+    </label></div>
+    <p class="muted">Performance : durée / (km + D+/100), en min/km-effort ; valeur faible = performance élevée. La proximité utilise une validation sans la course évaluée. Les trois meilleures proximités sont mises en évidence dans chaque groupe. Sans autre référence du même groupe, l’estimation reste indisponible.</p>
+    <details><summary>Sélectionner les courses à prendre dans le modèle</summary><div class="scroll"><table><caption>Choix des fichiers participant au modèle · une modification relance le calcul</caption><thead><tr><th>Fichier</th><th>Inclure dans le modèle</th></tr></thead><tbody id="reference-selection"></tbody></table></div></details>
+    <h3>Répartition des références par profil et distance</h3>
+    <figure id="reference-histogram" aria-label="Histogramme du nombre de références par profil et distance"></figure>
+    <div id="histogram-legend" class="controls"></div>
+    <p class="muted">Nombre de courses retenues et analysées dans chaque groupe. Cliquez sur une barre ou utilisez Entrée/Espace pour afficher les courses incluses et filtrer le classement.</p>
+    <div class="controls"><p id="histogram-filter-summary" role="status">Toutes les courses sont affichées.</p>
+      <button class="button" id="clear-histogram-filter" type="button" hidden>Afficher toutes les courses</button></div>
+    <div id="histogram-selection-panel" hidden>
+      <h3>Courses du groupe sélectionné</h3>
+      <table class="histogram-details-table"><thead><tr><th>Course</th><th>Distance</th><th>D+</th><th>Temps enregistré</th><th>Détails</th></tr></thead><tbody id="histogram-course-list"></tbody></table>
+    </div>
+    <p id="cache-info" class="muted notice"></p>
+    <div class="metrics" id="reference-metrics"></div>
+    <p id="reference-status" role="status">Chargement des courses…</p>
+    <div class="scroll" id="reference-table" hidden>
+      <table id="reference-ranking"><colgroup><col style="width:30%"><col style="width:8%"><col style="width:7%"><col style="width:7%"><col style="width:11%"><col style="width:10%"><col style="width:12%"><col style="width:15%"></colgroup><thead><tr><th>Classement / course · déplier les détails</th><th>Distance</th><th>D+</th><th>D−</th>
+        <th>Temps GPX</th><th>Pauses estimées</th><th>Estimé · groupe</th><th>Écart groupe / performance</th></tr></thead><tbody id="courses"></tbody></table>
+    </div>
+    <details><summary>Comment le temps est estimé</summary>
+      <p class="muted notice">Les courses sont regroupées selon cinq classes de distance et quatre profils de relief : Plat / Vallonné, Intermédiaire / Montagne, Dents de scie et Mixte. L’échantillonnage s’adapte au groupe et conserve les changements de relief significatifs. Les modèles de groupe sont combinés au modèle global, avec une contribution réduite quand les références du groupe sont rares. Les temps écoulés, pauses comprises, servent au recalage.</p>
+    </details>
+  </section>
+  <section class="screen-references" hidden aria-labelledby="library-title">
+    <h2 id="library-title">Références locales et Garmin Connect</h2>
+    <div class="controls">
+      <button class="button library-action" id="refresh-references" type="button">Vérifier et mettre à jour les références</button>
+      <button class="button library-action" id="upload-reference" type="button">Ajouter une référence GPX</button>
+      <input type="file" id="reference-file" accept=".gpx" hidden>
+    </div>
+    <p id="library-status" role="status">Les imports et les modèles sont conservés sur cet ordinateur.</p>
+    <progress id="operation-progress" max="100" value="0" hidden aria-label="Avancement de l'opération"></progress>
+    <p id="garmin-overview" role="status">Vérification du connecteur Garmin…</p>
+    <details open>
+      <summary>Connexion personnelle Garmin Connect</summary>
+      <p class="muted notice">Connecteur communautaire facultatif. La session et les identifiants sont conservés en mémoire pendant l’utilisation. Les activités téléchargées sont stockées localement.</p>
+      <div class="controls">
+        <label for="garmin-email">Adresse Garmin <input id="garmin-email" type="email" autocomplete="username"></label>
+        <label for="garmin-password">Mot de passe <input id="garmin-password" type="password" autocomplete="current-password"></label>
+        <button class="button" id="garmin-connect" type="button">Se connecter</button>
+        <button class="button" id="garmin-disconnect" type="button">Se déconnecter</button>
+      </div>
+      <div class="controls" id="garmin-mfa-fields" hidden>
+        <label for="garmin-mfa">Code de double authentification <input id="garmin-mfa" type="text" autocomplete="one-time-code" inputmode="numeric"></label>
+        <button class="button" id="garmin-mfa-submit" type="button">Valider le code</button>
+      </div>
+      <p id="garmin-status" role="status"></p>
+    </details>
+    <h3 class="notice">Critères d’import et de suppression locale</h3>
+    <div class="filter-grid">
+      <label for="import-kind">Activité
+        <select id="import-kind"><option value="all">Toutes</option><option value="running">Course à pied</option><option value="cycling">Vélo</option><option value="hiking">Randonnée / marche</option></select>
+      </label>
+      <label for="import-profile">Profil de relief
+        <select id="import-profile"><option value="all">Tous les profils</option><option value="flat">▱ Plat / Vallonné</option><option value="mountain">▲ Intermédiaire / Montagne</option><option value="sawtooth">⋀⋀ Dents de scie</option><option value="mixed">∿ Mixte</option></select>
+      </label>
+      <label for="import-distance-class">Classe de distance
+        <select id="import-distance-class"><option value="all">Toutes les distances</option><option value="very_short">Moins de 20 km</option><option value="short">20 à moins de 50 km</option><option value="medium">50 à moins de 100 km</option><option value="long">100 à moins de 160 km</option><option value="ultra">160 km et plus</option></select>
+      </label>
+      <label for="import-min-km">Km minimum <input id="import-min-km" type="number" min="0" step="0.1"></label>
+      <label for="import-max-km">Km maximum <input id="import-max-km" type="number" min="0" step="0.1"></label>
+      <label for="import-min-date">Date minimum <input id="import-min-date" type="date"></label>
+      <label for="import-max-date">Date maximum <input id="import-max-date" type="date"></label>
+    </div>
+    <p class="muted">Les critères se cumulent. Le profil et la classe de distance sont calculés sur le GPX ; Garmin peut donc devoir transmettre une trace avant son filtrage. Les kilomètres minimum et maximum portent sur la distance déclarée de l’activité.</p>
+    <label><input id="import-use-running" type="checkbox" checked> Utiliser les courses à pied importées comme références</label>
+    <div class="controls">
+      <button class="button library-action" id="garmin-import" type="button">Importer depuis Garmin</button>
+      <button class="button" id="garmin-stop" type="button" disabled>Interrompre l’import Garmin</button>
+      <button class="button library-action" id="delete-matching" type="button">Effacer les imports filtrés</button>
+      <button class="button library-action" id="delete-all" type="button">Effacer tous les imports locaux</button>
+    </div>
+    <p class="muted">La suppression concerne les imports locaux. Les fichiers du dossier data/references et les activités du compte Garmin sont conservés.</p>
+    <div class="scroll">
+      <table><caption>Activités importées sur cet ordinateur · filtrées selon les critères ci-dessus</caption>
+      <thead><tr><th>Date</th><th>Nom</th><th>Type</th><th>Profil</th><th>Classe de distance</th><th>Distance</th><th>Source</th><th>Référence du modèle</th></tr></thead>
+      <tbody id="local-activities"></tbody></table>
+    </div>
+  </section>
+  <section class="screen-references" hidden aria-labelledby="model-title">
+    <h2 id="model-title">Modèle prédictif · vitesse selon la pente</h2>
+    <p class="muted">Comparez les modèles par profil et distance. Les points orange représentent les allures médianes retenues pour l’apprentissage, converties en vitesse. La courbe verte représente le modèle retenu. Si la validation favorise le modèle global, la courbe du groupe reste visible en pointillés.</p>
+    <div class="controls"><label for="model-select">Modèle affiché
+      <select id="model-select"><option value="global">Toutes les références · modèle global</option></select>
+    </label></div>
+    <div id="validation-comparison" class="metrics"></div>
+    <p id="validation-note" class="muted"></p>
+    <figure id="model-chart"></figure>
+    <p id="model-info" class="muted"></p>
+    <div class="scroll">
+      <table><caption>Groupes de distance et de relief · sélectionner une ligne pour afficher sa courbe</caption>
+      <thead><tr><th>Profil</th><th>Distance</th><th>Références du groupe</th><th>Pas minimal de la famille</th><th>Erreur médiane · mode automatique</th><th>Apprentissage</th></tr></thead>
+      <tbody id="model-groups"></tbody></table>
+    </div>
+    <details><summary>Règles de segmentation et d’échantillonnage</summary>
+      <p class="muted notice">La classification utilise une grille commune de 25 m, un lissage médian sur trois points et une inversion minimale de 10 m entre ascensions. Les pentes sont évaluées sur une fenêtre de 100 m. Une petite bosse gagne moins de 100 m ; une grande ascension gagne au moins 500 m, ou au moins 300 m sur 5 km ; les autres ascensions sont intermédiaires.</p>
+      <p class="muted notice">Priorités : montagne si au moins 50 % du D+ vient des grandes ascensions ; plat si D+ &lt; 5 m/km et moins de 10 % de portions au-delà de ±3 % ; petites bosses répétées si elles représentent au moins 60 % du D+, avec au moins 4 petites bosses par 10 km avec une longueur médiane des petites bosses ≤ 1 km et D+ ≥ 10 m/km ; faible relief si D+ &lt; 20 m/km ; relief intermédiaire si au moins 50 % du D+ y est réalisé ; sinon profil mixte. Les classes de distance sont &lt; 20, 20–50, 50–100, 100–160 et ≥ 160 km. Ces seuils sont propres à l’application et restent à calibrer. Pour l’apprentissage, plat et faible relief sont regroupés dans Plat / Vallonné ; montagne et relief intermédiaire dans Intermédiaire / Montagne. Le profil de petites bosses est nommé Dents de scie ; Mixte reste distinct.</p>
+      <p class="muted notice">Les pas cibles vont de 25 à 250 m selon le profil et la distance. Les sommets et creux significatifs sont ajoutés aux points de la grille, ce qui peut raccourcir localement le pas. Les courses longues reçoivent des points plus espacés, tandis que les dents de scie sont analysées plus finement. La pondération tient compte de la longueur représentée par chaque observation pour limiter l’effet du nombre de points. Un ajustement régularisé de la durée selon la distance est appris au sein de chaque profil. La pondération tient également compte de la densité de D+, de la fréquence, de la longueur et du gain médian des ascensions et de la répartition du D+ entre petites, moyennes et grandes ascensions.</p>
+    </details>
+    <h3 class="notice">Test des niveaux d’inclinaison</h3>
+    <p class="muted">Onze classes distinguent le plat et les niveaux de pente en montée et en descente. Les classes peu documentées s’appuient sur le modèle global. Le candidat est disponible dans le choix du modèle pour le parcours importé.</p>
+    <div id="inclination-test-metrics" class="metrics"></div>
+    <p id="inclination-test-note" class="muted"></p>
+    <div class="scroll">
+      <table><caption>Validation des temps par niveau de pente sur les portions horodatées</caption>
+      <thead><tr><th>Inclinaison</th><th>Distance testée</th><th>Portions</th><th>Écart cumulé · modèle actuel</th><th>Écart cumulé · candidat</th></tr></thead>
+      <tbody id="inclination-test-bands"></tbody></table>
+    </div>
+  </section>
+  <section id="screen-map" hidden aria-labelledby="reference-map-title">
+    <h2 id="reference-map-title">Carte de toutes les courses de référence</h2>
+    <p>Localisez les références retenues et exclues du modèle. Sélectionnez une course dans le sélecteur, la liste ou sur une trace pour centrer la carte et afficher ses informations.</p>
+    <div id="reference-map-panel">
+    <div class="controls"><button class="button" id="reference-map-fullscreen" type="button" aria-pressed="false"><span aria-hidden="true">⛶</span> Carte en plein écran</button>
+    <button class="button" id="refresh-reference-map" type="button">Actualiser la carte</button>
+      <label><input id="map-active-only" type="checkbox">Afficher uniquement les références retenues</label></div>
+    <label for="reference-course-select">Sélectionner une course<select id="reference-course-select"><option value="">Toutes les courses</option></select></label>
+    <details id="reference-course-details" hidden open><summary>Informations de la course sélectionnée</summary><div id="reference-course-info" class="metrics reference-course-info"></div></details>
+    <p id="reference-map-status" role="status"></p>
+    <div id="reference-map" aria-label="Carte de toutes les courses de référence"></div>
+    </div>
+    <div class="scroll"><table><thead><tr><th>Course</th><th>Profil</th><th>Distance</th><th>Modèle</th><th>Carte</th></tr></thead><tbody id="reference-map-list"></tbody></table></div>
+  </section>
+  <section id="screen-simulations" hidden aria-labelledby="simulation-title">
+    <h2 id="simulation-title">Simulation et comparaison de plusieurs runs</h2>
+    <p>Importez un ou plusieurs GPX chronométrés pour comparer leurs temps enregistrés, sans appliquer de prédiction. Les méthodes prédictives restent disponibles en option. Vous pouvez aussi ajouter le résultat courant de l’écran Analyse. Les scénarios sont conservés dans ce navigateur.</p>
+    <div class="controls">
+      <button class="button" id="select-simulation-gpx" type="button">Importer des GPX à simuler</button>
+      <input id="simulation-files" type="file" accept=".gpx,application/gpx+xml" multiple hidden>
+      <span id="simulation-files-info">Aucun fichier sélectionné</span>
+    </div>
+    <div class="filter-grid">
+      <label for="simulation-mode">Méthode de simulation<select id="simulation-mode"><option value="recorded">Temps enregistrés du GPX · sans prédiction</option><option value="model">Modèle appris</option><option value="total">Durée totale</option><option value="pace">Allure min/km</option></select></label>
+      <label for="simulation-model" id="simulation-model-fields" hidden>Modèle<select id="simulation-model"><option value="auto">Automatique</option><option value="global">Global</option><option value="inclination">Inclinaison</option></select></label>
+      <label for="simulation-total" id="simulation-total-fields" hidden>Durée · heures:minutes:secondes<input id="simulation-total" placeholder="10:00:00"></label>
+      <label for="simulation-pace" id="simulation-pace-fields" hidden>Allure · minutes:secondes/km<input id="simulation-pace" placeholder="06:30"></label>
+      <label for="simulation-departure" id="simulation-departure-fields" hidden>Départ des simulations<input id="simulation-departure" type="datetime-local"></label>
+      <label for="simulation-spacing">Espacement des repères (km)<input id="simulation-spacing" type="number" min="1" max="50" value="5"></label>
+    </div>
+    <p class="muted">Le traitement des GPX se choisit dans la page « Conversion GPX » et s’applique aussi aux fichiers importés ici.</p>
+    <p id="recorded-help" class="muted">Mode enregistré : durée, départ, arrivée et passages proviennent des horodatages GPX. Aucun modèle prédictif ni allure imposée. Un fichier sans horodatage est refusé.</p>
+    <button class="button" id="simulate-files" type="button">Comparer / simuler les GPX sélectionnés</button>
+    <div class="controls"><label for="run-name">Nom du run <input id="run-name" maxlength="100" placeholder="Objectif prudent"></label>
+    <button class="button" id="save-run" type="button">Ajouter l’analyse actuelle</button></div>
+    <p id="simulation-status" role="status"></p>
+    <div class="scroll"><table><caption>Informations des fichiers et scénarios comparés</caption><thead><tr><th>Nom / fichier</th><th>Date du fichier</th><th>Distance</th><th>D+</th><th>D−</th><th>Durée</th><th>Départ</th><th>Arrivée</th><th>Profil de relief</th><th>Classe de distance</th><th>Actions</th></tr></thead><tbody id="simulation-runs"></tbody></table></div>
+    <div class="controls simulation-controls">
+ <button id="simulation-play" class="button" type="button">▶ Lire les traces ensemble</button>
+ <label>Position commune <input id="simulation-progress" type="range" min="0" max="1000" value="0"></label>
+ <label>Vitesse <input id="simulation-speed" type="range" min="60" max="7200" step="60" value="600"><output id="simulation-speed-value">×600</output></label>
+ <label>Départ commun pour la lecture <input id="simulation-anchor" type="datetime-local"></label>
+ <label>Coloration <select id="simulation-color"><option value="grade">Pente</option><option value="elevation">Altitude</option><option value="speed">Vitesse</option></select></label>
+ </div><p class="muted">Les départs sont alignés à zéro pour la lecture. Les horaires d’origine restent dans le tableau. Chaque trace s’arrête à son arrivée.</p>
+ <p id="simulation-clock" role="status"></p><div id="simulation-views"></div>
+ <div id="simulation-chart"></div>
+
+    <div class="scroll"><table><caption>Temps cumulés et horaires aux repères communs (même parcours)</caption><thead id="simulation-marks-head"></thead><tbody id="simulation-marks"></tbody></table></div>
+  </section>
+</main>
+<div id="tour-panel" class="tour-overlay no-print" hidden>
+ <section role="dialog" aria-modal="true" aria-labelledby="tour-title" tabindex="-1" id="tour-dialog">
+ <p id="tour-counter"></p><h2 id="tour-title"></h2><p id="tour-description"></p>
+ <label><input id="tour-disabled" type="checkbox">Ne plus afficher au démarrage</label>
+ <div class="controls"><button class="button" id="tour-previous">Précédent</button><button class="button" id="tour-next">Suivant</button><button class="button" id="tour-close">Fermer</button></div>
+ </section>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+<script src="/assets/app.js"></script>
+<script src="/assets/backup.js"></script>
+</body>
+</html>

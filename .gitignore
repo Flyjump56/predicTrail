@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+backups/
+sorties/
+data/local/
+data/parcours/
+data/references/*
+!data/references/Demonstration-fictive-1.gpx
+!data/references/Demonstration-fictive-2.gpx
+!data/references/Demonstration-fictive-3.gpx
+*.spec
