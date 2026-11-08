@@ -20,7 +20,22 @@ for source in sorted((root/"src"/"bzhaventure").glob("*.py")):
 command += [str(root/"tools"/"windows_entry.py")]
 subprocess.run(command,cwd=root,check=True)
 package=root/"dist"/"PredicTrail"
-shutil.copy2(root/"docs"/"DEMARRAGE-WINDOWS.md",package/"LIRE-MOI.md")
+# Les mêmes trois guides sont livrés avec les sources et le paquet autonome.
+shutil.copytree(root/"docs",package/"docs",dirs_exist_ok=True)
+(package/"LIRE-MOI.md").write_text("""# PrédicTrail — par BZHAventure
+
+Décompresser entièrement le ZIP, puis ouvrir PredicTrail.exe.
+Conserver le dossier _internal et la fenêtre de lancement ouverte.
+Python et les dépendances Garmin sont inclus ; les exemples sont fictifs.
+Les données personnelles se trouvent dans %LOCALAPPDATA%/PredicTrail.
+
+- [Architecture, déploiement et démarrage](docs/ARCHITECTURE.md)
+- [Fonctionnel, sauvegarde et restauration](docs/FONCTIONNEL.md)
+- [Modèle](docs/MODELE.md)
+
+Avant une mise à jour, créer une sauvegarde complète depuis l’application
+et conserver son ZIP sur un autre support.
+""",encoding="utf-8")
 shutil.copy2(root/"requirements-windows.lock",package/"DEPENDANCES.txt")
 archive=root/"dist"/f"PredicTrail-{__version__}-Windows-x64.zip"
 with zipfile.ZipFile(archive,"w",zipfile.ZIP_DEFLATED,compresslevel=6) as output:

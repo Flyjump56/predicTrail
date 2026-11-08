@@ -1,3 +1,159 @@
+# Architecture, déploiement et démarrage
+
+PrédicTrail 3.0.0 · documentation consolidée le 8 novembre 2026.
+
+[Fonctionnel, sauvegarde et restauration](FONCTIONNEL.md) · [Modèle](MODELE.md)
+
+## Lire ce guide
+
+Les sections principales décrivent la version actuelle. Les documents d’origine sont conservés intégralement en annexes repliables pour la traçabilité ; leurs descriptions datées ne remplacent pas les règles actuelles. Les anciens noms de fichiers restent visibles comme références historiques, mais leurs liens sont redirigés vers ces trois guides.
+
+## Démarrer depuis les sources
+
+Le cœur utilise la bibliothèque standard de Python et accepte Python 3.9 ou supérieur. L’import Garmin facultatif exige Python 3.10 ou supérieur. La version actuellement vérifiée sur ce poste est Python 3.15.2. Depuis la racine du projet, utiliser l’interpréteur de l’environnement du projet :
+
+```powershell
+.\.venv\Scripts\python.exe -B lancer.py
+```
+
+Pour une nouvelle installation, créer d’abord l’environnement avec un Python compatible installé :
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-garmin.txt
+.\.venv\Scripts\python.exe -B lancer.py
+```
+
+L’installation des dépendances Garmin est facultative pour le calcul local. Le lanceur `Demarrer-BZHAventure.cmd` utilise également l’environnement du projet. Ouvrir [l’application locale](http://127.0.0.1:8765), conserver la console ouverte et arrêter le serveur avec Ctrl+C. Si `python` désigne un alias Windows défectueux ou une autre installation, utiliser le chemin complet du Python souhaité pour créer l’environnement.
+
+L’initialisation affiche ses étapes. Les modes durée, allure et temps enregistrés sont utilisables sans attendre les modèles. Les cartes en ligne et Garmin nécessitent Internet ; les calculs sont locaux et un tracé SVG sert de repli quand Leaflet est indisponible.
+
+## Démarrer le paquet Windows
+
+Décompresser entièrement le ZIP Windows x64, puis ouvrir `PredicTrail.exe`. Conserver son dossier `_internal` et tous les fichiers livrés. Aucun Python externe n’est nécessaire. Les trois références fournies sont fictives. Le navigateur s’ouvre sur le serveur local ; fermer la console termine l’application.
+
+Les données sont séparées du programme. Avant une mise à jour, créer une sauvegarde complète, remplacer le dossier du programme, puis relancer ; transférer les données d’une installation source vers le paquet par sauvegarde/restauration, pas par copie d’une base ouverte.
+
+## Organisation et responsabilités
+
+| Élément | Responsabilité |
+|---|---|
+| `lancer.py`, `predire.py`, `cli.py` | Serveur local et commande de rapport/prédiction |
+| `settings.py` | Chemins, limites, classes et configuration |
+| `gpx.py`, `gpx_import.py` | Lecture, relief, grille adaptative et conversion XML |
+| `models.py`, `analysis.py` | Apprentissage, validation, catalogue et analyse des références |
+| `prediction.py`, `recorded.py`, `strategy.py` | Intégration des durées, chronologie d’origine et stratégies |
+| `storage.py`, `backup.py` | SQLite, caches, état utilisateur, sauvegarde et restauration |
+| `garmin.py` | Connexion facultative, filtres, import et annulation |
+| `reference_map.py`, `export.py`, `reporting.py` | Géométries, GPX exporté et rapport HTML |
+| `server.py`, `validation.py` | API HTTP, travaux asynchrones et processus surveillé |
+| `web/index.html`, `styles.css`, `app.js`, `backup.js` | Six écrans, cartes, lecture, impression et sauvegardes |
+| `tools/`, `tests/`, `assets/` | Diffusion, vérifications et identité visuelle |
+
+La version applicative se trouve dans `src/bzhaventure/__init__.py`. Les calculs manipulent mètres, secondes et pentes en pourcentage ; les modèles fournissent une allure en secondes par mètre. Les segments GPX restent distincts, sans distance de raccordement artificielle. Les intervalles adaptatifs utilisent leurs bornes réelles, et non un pas supposé uniforme.
+
+## Données et configuration
+
+| Contexte | Emplacement par défaut |
+|---|---|
+| Exécution depuis les sources | `data/` du projet |
+| Paquet Windows | `%LOCALAPPDATA%/PredicTrail` |
+| Références natives | `references/` dans ce dossier de données |
+| Base SQLite | `local/bzhaventure.sqlite3` |
+| Sources des nouveaux parcours conservés | `local/parcours-importes/` |
+| Sauvegardes quotidiennes | `local/sauvegardes/` |
+
+`PREDICTRAIL_DATA_DIR` change le dossier des données ; effectuer une sauvegarde avant de le changer. `PREDICTRAIL_PORT` change le port 8765. `PREDICTRAIL_NO_AUTO_BACKUP=1` désactive les sauvegardes quotidiennes automatiques. Ne pas utiliser le même dossier de données avec deux instances simultanées.
+
+SQLite conserve activités importées, choix d’inclusion, analyses, modèles, classification des imports et état utilisateur. Les scénarios, réglages et repères sont synchronisés dans `app_state`. Les données d’anciens navigateurs sont migrées à leur première ouverture. Les secrets et sessions Garmin restent uniquement en mémoire.
+
+Les caches évitent de réanalyser les fichiers inchangés : taille/date, puis empreinte de contenu si nécessaire. Une empreinte du code de calcul et de la version majeure/mineure Python invalide les caches devenus incompatibles. Un fichier modifié en conservant volontairement taille et date peut échapper au premier contrôle. Une signature de contenu et un chargement restreint protègent la désérialisation des caches.
+
+## Serveur, API et surveillance
+
+Le serveur HTTP écoute sur `127.0.0.1` et vérifie l’origine des écritures. Il sert une liste fermée de ressources. Les routes concernent le démarrage, les références et leur sélection, la prédiction, la carte, les conversions, Garmin, l’état utilisateur et les sauvegardes. La prédiction accepte un GPX brut ou une requête JSON avec GPX encodé en base64 ; modes `model`, `total`, `pace`, `recorded`. Les erreurs de saisie donnent HTTP 400 et les modèles indisponibles HTTP 503 ; le suivi et les modes indépendants restent accessibles.
+
+Les écritures et mises à jour sont sérialisées ; références et modèles sont publiés ensemble. La validation s’effectue dans un processus enfant isolé, sans accès à la base utilisateur. Avertissement après 30 secondes sans progression, arrêt après 180 secondes sans progression ou 1 800 secondes au total. Aucun modèle partiel n’est publié. Cette surveillance ne couvre pas la lecture initiale des fichiers ni un appel réseau Garmin en cours.
+
+Limites principales : import analysable de 20 Mio après conversion, source à convertir de 100 Mio ; sauvegarde ZIP de 2 Gio, contenu décompressé de 4 Gio et 10 000 entrées. Les contrôles détaillés de restauration figurent dans le guide fonctionnel.
+
+## Construire et diffuser
+
+Dans un environnement Windows de construction dédié :
+
+```powershell
+python -m venv .venv-build
+.\.venv-build\Scripts\python.exe -m pip install -r requirements-windows.lock
+.\.venv-build\Scripts\python.exe tools/build_windows.py
+```
+
+Le script PyInstaller produit `dist/PredicTrail-3.0.0-Windows-x64.zip` et son fichier SHA-256. Le paquet comprend les dépendances, trois démonstrations fictives et les trois guides dans `docs/`, avec une notice `LIRE-MOI.md`. Le mécanisme de processus isolé est activé pour l’exécutable Windows.
+
+Pour préparer les sources publiables :
+
+```powershell
+.\.venv\Scripts\python.exe tools/public_snapshot.py build/public-source-nouveau
+```
+
+La destination doit être nouvelle. Le script utilise une liste autorisée et génère trois GPX fictifs. Le dépôt public reçoit cette copie propre, sans les GPX personnels, bases, sauvegardes ni l’historique Git privé. Ne pas pousser les branches ou tags de développement privés dans le dépôt public. Git sauvegarde le code ; les ZIP de l’application sauvegardent les données personnelles.
+
+Le paquet n’est pas signé numériquement ; une deuxième machine Windows physique et une authentification Garmin réelle restent à vérifier. La licence de diffusion reste à choisir par l’auteur.
+
+## Vérifier et diagnostiquer
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest discover -s tests -v
+node --check src/bzhaventure/web/app.js
+node --check src/bzhaventure/web/backup.js
+node tests/test_web.js
+git diff --check
+```
+
+Pour un rapport en ligne de commande : `python predire.py --help` ; `python predire.py --validation` rejoue la validation. Fournir explicitement le chemin GPX évite le sélecteur Tkinter. Vérifier visuellement carte/profil colorés, lecture et plein écran, départ et arrivée, impression, export et sauvegarde/restauration sur un dossier de test.
+
+En cas d’échec, lire la console et le suivi de démarrage, vérifier les GPX rejetés et réduire temporairement la sélection si la validation dépasse les délais. Port occupé : arrêter l’autre instance ou changer `PREDICTRAIL_PORT`. Page ancienne : Ctrl+F5 après redémarrage. Garmin indisponible : vérifier l’interpréteur et les dépendances, puis consulter le guide fonctionnel.
+
+## Contrôle de consolidation
+
+Les 23 documents de `docs/` ont été inventoriés avant modification. Le tableau ci-dessous donne leur destination. Leur contenu complet est repris dans les annexes repliables, avec seulement l’adaptation des liens Markdown. Les anciens résultats sont datés et ne constituent pas une nouvelle mesure de précision.
+
+Une archive locale `backups/documentation-avant-consolidation-20261108.zip` contient les 23 originaux exacts et un manifeste SHA-256. Avant retrait des anciens fichiers, le contrôle vérifie chaque empreinte dans le ZIP et la présence de chaque texte transposé dans sa destination. Cette archive locale est exclue de GitHub ; les annexes et le tableau de correspondance y sont publiés.
+
+| Ancien document | Destination vérifiée |
+|---|---|
+| `ARCHITECTURE.md` | [ARCHITECTURE.md — annexe source](ARCHITECTURE.md#source-architecture) |
+| `DEMARRAGE-WINDOWS.md` | [ARCHITECTURE.md — annexe source](ARCHITECTURE.md#source-demarrage-windows) |
+| `DIFFUSION.md` | [ARCHITECTURE.md — annexe source](ARCHITECTURE.md#source-diffusion) |
+| `FONCTIONNEL.md` | [FONCTIONNEL.md — annexe source](FONCTIONNEL.md#source-fonctionnel) |
+| `GARMIN.md` | [FONCTIONNEL.md — annexe source](FONCTIONNEL.md#source-garmin) |
+| `MODELE-2.0.md` | [MODELE.md — annexe source](MODELE.md#source-modele-2-0) |
+| `MODELE-2.1.md` | [MODELE.md — annexe source](MODELE.md#source-modele-2-1) |
+| `SAUVEGARDES.md` | [FONCTIONNEL.md — annexe source](FONCTIONNEL.md#source-sauvegardes) |
+| `VALIDATION-1.1.md` | [MODELE.md — annexe source](MODELE.md#source-validation-1-1) |
+| `VALIDATION-1.2.1.md` | [MODELE.md — annexe source](MODELE.md#source-validation-1-2-1) |
+| `VALIDATION-1.2.2.md` | [MODELE.md — annexe source](MODELE.md#source-validation-1-2-2) |
+| `VALIDATION-1.2.md` | [MODELE.md — annexe source](MODELE.md#source-validation-1-2) |
+| `VALIDATION-1.3.md` | [MODELE.md — annexe source](MODELE.md#source-validation-1-3) |
+| `VALIDATION-2.0.md` | [MODELE.md — annexe source](MODELE.md#source-validation-2-0) |
+| `VALIDATION-2.1.2.md` | [MODELE.md — annexe source](MODELE.md#source-validation-2-1-2) |
+| `VALIDATION-2.1.3.md` | [MODELE.md — annexe source](MODELE.md#source-validation-2-1-3) |
+| `VALIDATION-2.1.md` | [MODELE.md — annexe source](MODELE.md#source-validation-2-1) |
+| `VALIDATION-2.2.md` | [MODELE.md — annexe source](MODELE.md#source-validation-2-2) |
+| `VALIDATION-2.3.md` | [MODELE.md — annexe source](MODELE.md#source-validation-2-3) |
+| `VALIDATION-2.4.1.md` | [MODELE.md — annexe source](MODELE.md#source-validation-2-4-1) |
+| `VALIDATION-2.4.md` | [MODELE.md — annexe source](MODELE.md#source-validation-2-4) |
+| `VALIDATION-3.0.md` | [MODELE.md — annexe source](MODELE.md#source-validation-3-0) |
+| `VALIDATION.md` | [MODELE.md — annexe source](MODELE.md#source-validation) |
+
+## Annexes des documents d’origine
+
+Contenu conservé pour traçabilité. Les indications de version, mesures, limites et emplacements historiques s’interprètent à leur date ; les sections principales ci-dessus font foi pour la version actuelle.
+
+<a id="source-architecture"></a>
+
+<details>
+<summary>ARCHITECTURE.md — document source intégral</summary>
+
 # Architecture et maintenance
 
 ## Points d'entrée
@@ -203,3 +359,55 @@ Les sorties HTTP conservent leur structure et ajoutent les indicateurs dans `cla
 `PROFILE_FAMILIES` rattache les six morphologies à quatre clés : flat, mountain, sawtooth et mixed. `PROFILE_LABELS` ne contient que ces familles d’apprentissage. `SOURCE_SAMPLING` conserve les anciens pas par morphologie, et `SAMPLING` décrit les minima du catalogue des familles. Les classifications de version 2.1 ajoutent `sourceProfile`. `select_candidate` conserve le pas du descripteur cible lorsque sa famille correspond au modèle choisi. Les alias de sélection rolling et intermediate sont normalisés.
 
 Le contrôleur conserve les références et objets de lignes construits dans le DOM. La sélection d’une barre applique un filtre visuel sans modifier les données ou la sélection d’apprentissage. Les états d’expansion sont conservés séparément de la visibilité. Les barres SVG sont des boutons accessibles au clavier ; la liste du groupe utilise textContent et des callbacks explicites vers les branches. Les classes CSS references-wide et reference-ranking maîtrisent la largeur, les retours à la ligne et la présentation mobile.
+
+</details>
+
+<a id="source-demarrage-windows"></a>
+
+<details>
+<summary>DEMARRAGE-WINDOWS.md — document source intégral</summary>
+
+# PrédicTrail — par BZHAventure
+
+Décompressez entièrement l’archive ZIP dans un dossier de votre choix, puis ouvrez PredicTrail.exe. Python et les dépendances Garmin sont inclus. Conservez la fenêtre de lancement ouverte pendant l’utilisation ; le navigateur s’ouvre à http://127.0.0.1:8765. Fermer la fenêtre de lancement arrête le serveur local.
+
+Les exemples fournis sont fictifs et servent uniquement à découvrir l’interface. Importez vos propres courses chronométrées pour construire un modèle personnel. Les cartes en ligne et Garmin nécessitent Internet ; les calculs restent locaux et une trace sans fond de carte reste disponible.
+
+Les données personnelles sont enregistrées séparément de l’application dans %LOCALAPPDATA%/PredicTrail. Changer de version en remplaçant le dossier du programme ne remplace pas ce dossier de données. En mode sources, le dossier data du projet reste utilisé. L’emplacement peut être changé avec PREDICTRAIL_DATA_DIR ; ne changez pas ce réglage sans sauvegarde.
+
+## Sauvegarde
+
+Ouvrez Sauvegarde et restauration puis Créer une sauvegarde complète. Téléchargez le ZIP et copiez-le sur un autre support. La sauvegarde inclut les références GPX, parcours conservés, imports, sélections, modèles, scénarios, réglages et repères. Les identifiants et sessions Garmin ne sont pas sauvegardés.
+
+Une copie locale automatique est créée une fois par jour au premier démarrage réussi. Toutes les copies sont conservées dans le sous-dossier local/sauvegardes ; aucune suppression automatique. Une copie sur le même disque ne protège pas d’une panne du disque.
+
+Pour restaurer, sélectionnez le ZIP, vérifiez la date et la version puis cliquez Restaurer les données. Le contenu est vérifié avant remplacement et une copie de sécurité est créée. Les modèles peuvent être recalculés. Reprendre le dernier parcours réouvre son GPX conservé ; les scénarios sont disponibles dans Simulation. Les anciens scénarios du navigateur sont repris à la première ouverture dans ce navigateur.
+
+## Distribution
+
+Ce paquet contient uniquement le programme, les illustrations de l’application et des exemples fictifs. Aucune course personnelle ni connexion Garmin n’y est incluse. Le programme n’est pas signé numériquement. Les conditions de licence et de diffusion publique restent à définir par l’auteur.
+
+</details>
+
+<a id="source-diffusion"></a>
+
+<details>
+<summary>DIFFUSION.md — document source intégral</summary>
+
+# Diffusion de PrédicTrail
+
+Le dépôt public https://github.com/Flyjump56/pr-dicTrail contient une copie des sources, illustrations, tests et exemples fictifs. Il ne reprend pas l’historique de développement local contenant des GPX personnels. Les données et sauvegardes restent exclues du dépôt.
+
+## Paquet Windows autonome
+
+Le script tools/build_windows.py construit une distribution Windows x64 avec PyInstaller 6.22.3 et Python 3.15.2, testés sur ce poste. Les dépendances exactes sont listées dans requirements-windows.lock. Créer un environnement de construction dédié, y installer ces dépendances puis lancer python tools/build_windows.py. Le résultat est dans dist/PredicTrail-3.0.0-Windows-x64.zip, accompagné d’une empreinte SHA-256. Décompresser tout le dossier avant de lancer PredicTrail.exe.
+
+Le paquet utilise des données utilisateur séparées dans %LOCALAPPDATA%/PredicTrail. Le binaire contient Python, Garmin et les ressources ; une installation Python externe n’est pas nécessaire. Un compte Garmin reste nécessaire pour l’import Garmin, et sa connexion réelle n’est pas testée par la construction. Le paquet n’est pas signé numériquement. Tester également sur un autre PC Windows avant une diffusion élargie.
+
+## Sauvegarde des sources
+
+Les sources publiques sont préparées par tools/public_snapshot.py dans build/public-source. Cette commande copie uniquement une liste autorisée et génère trois GPX fictifs. Elle refuse d’écraser une préparation existante. Le dépôt Git public doit être initialisé à partir de cette copie propre, sans pousser les branches ou tags de l’historique privé local.
+
+Les sauvegardes de données et les archives Git privées ne doivent pas être ajoutées au dépôt public. Les conditions de licence de l’application restent à définir par l’auteur avant une diffusion plus large.
+
+</details>

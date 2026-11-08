@@ -1,3 +1,107 @@
+# Fonctionnel, sauvegarde et restauration
+
+PrédicTrail 3.0.0 · documentation consolidée le 8 novembre 2026.
+
+[Architecture, déploiement et démarrage](ARCHITECTURE.md) · [Modèle](MODELE.md)
+
+## Périmètre actuel
+
+L’application estime les temps de passage d’une personne à partir de ses références GPX chronométrées. Six écrans sont disponibles : Analyse d’un parcours, Courses de référence et modèle prédictif, Carte des références, Simulation et comparaison, Conversion GPX, Sauvegarde et restauration. Le ruban affiche le nom PrédicTrail, BZHAventure et les versions. L’assistant de présentation peut être désactivé puis réactivé.
+
+Les sections suivantes décrivent le comportement actuel. Les annexes repliables conservent les détails et évolutions des anciens guides : une fonction décrite sous une ancienne version peut avoir été déplacée ou remplacée depuis.
+
+## Analyse d’un parcours
+
+Choisir un GPX avec coordonnées et altitudes, puis sélectionner un mode : modèle appris, durée totale, allure au kilomètre ou temps enregistrés. Le dernier mode exige des dates ordonnées et une durée positive ; il reprend les temps du fichier sans prédiction. Les deux modes manuels permettent de calculer sans références initialisées.
+
+Le modèle peut être automatique, global, de groupe relief/distance ou expérimental par inclinaison. Choisir l’espacement des repères de 1 à 50 km. Ajouter des points par kilomètre depuis le départ et un commentaire, par exemple un ravitaillement ; les distances hors parcours sont refusées. La limite est de 200 repères personnalisés et 500 caractères par commentaire. Changer de fichier réinitialise ces repères.
+
+Une date et une heure locales de départ permettent d’afficher les dates et heures de passage et d’arrivée dans le récapitulatif, le tableau, les repères et le suivi de lecture. Après modification, utiliser Recalculer les horaires. Une heure inexistante au changement d’heure est signalée ; les horodatages GPX exportés sont exprimés en UTC.
+
+## Stratégie d’allure
+
+Le bloc se trouve dans **Analyse d’un parcours**, avant Calculer le parcours. Il s’applique à une estimation, jamais aux temps enregistrés, et ne modifie pas les références ni les modèles appris.
+
+- Ajustement global de durée : −50 % à +100 %. Une valeur négative réduit le temps, une valeur positive l’augmente ; il ne s’agit pas d’un pourcentage de vitesse.
+- Split positif : première moitié de distance plus rapide, seconde plus lente. Split négatif : première moitié plus lente, seconde plus rapide. Intensité de 0 à 40 % ; le split seul conserve la durée totale initiale.
+- Réglage des montées : −50 % à +100 % de durée sur les portions de pente supérieure à +3 %. Le réglage des montées peut modifier le résultat total et l’équilibre final du split.
+
+Le calcul applique le split, le facteur des montées puis l’ajustement global. Exemple : base de 10 h, ajustement de −10 %, split négatif de 10 % et montées à 0 % donnent 9 h, dont 4 h 57 sur la première moitié et 4 h 03 sur la seconde. Ajouter l’analyse actuelle à Simulation conserve cette stratégie.
+
+## Carte, profil et restitution
+
+La carte et le profil partagent la coloration par pente, altitude ou vitesse, ainsi que le suivi de position et les horaires. Le curseur permet de se placer sur le parcours ; lecture/pause et vitesse de 60 à 7 200 fois le temps réel pilotent l’animation. Les commandes restent accessibles en plein écran. Le tableau indique temps cumulés, horaires et sens dominant montée/plat/descente entre repères.
+
+Exporter le parcours GPX conserve sa géométrie et ses segments, ajoute les repères commentés et les horaires estimés lorsqu’un départ est renseigné. Imprimer la prédiction prépare carte, profil, résumé et tableau ; le fond de carte dépend du chargement des tuiles. L’export prépare une trace existante, sans création de nouveaux chemins par dessin. La compatibilité avec chaque appareil GPS reste à vérifier.
+
+## Références et modèle prédictif
+
+Importer des GPX chronométrés ou ajouter des fichiers dans le dossier des références puis actualiser. Les fichiers invalides sont signalés ; les contenus identiques sont dédupliqués. Cocher ou décocher une course change son inclusion dans l’apprentissage et actualise les modèles. L’analyse détaille distance, dénivelés, relief, ascensions, pentes, temps de déplacement, pauses et interruptions.
+
+Le classement s’effectue par famille de relief et classe de distance. La performance est exprimée notamment par l’allure au kilomètre-effort, avec kilomètres-effort = kilomètres + D+/100. La proximité au modèle est calculée en excluant la course elle-même et en utilisant seulement ses pairs de groupe ; sans pair, aucune estimation ni étoile de proximité n’est produite. Les indicateurs du mode automatique global restent distincts.
+
+L’histogramme comporte 20 groupes. Cliquer une barre ou la sélectionner au clavier affiche les courses du groupe et filtre leur classement ; sélectionner à nouveau ou afficher toutes les courses retire le filtre. Cela ne change pas l’inclusion dans le modèle. Le choix du modèle affiché filtre aussi le tableau du catalogue correspondant.
+
+## Carte des références
+
+La carte regroupe les courses natives et importées, y compris celles exclues du modèle selon les filtres. Filtrer par profil, distance et inclusion. Sélectionner une course dans la liste, son tracé ou ses commandes centre automatiquement la carte et affiche nom, profil, classe, distance, D+, D−, durée, horaires, pauses et état d’inclusion. Le bouton plein écran conserve les commandes ; Échap permet d’en sortir.
+
+## Simulation et comparaison
+
+Importer plusieurs GPX chronométrés pour comparer leurs temps réels sans application de prédiction. Les modes prédictifs et manuels restent des choix explicites ; l’ajout de l’analyse actuelle permet aussi de comparer une stratégie. Jusqu’à 20 runs sont conservés comme instantanés : une modification ultérieure des modèles ne les réécrit pas.
+
+Le tableau présente fichier, date, distance, D+, D−, durée, départ, arrivée, profil, classe et retrait. Chaque course a sa carte et son profil coloré. L’horloge de lecture commune aligne visuellement les départs ; les horaires d’origine restent visibles dans le tableau. Le curseur et la vitesse de lecture commandent toutes les positions simultanément. Pendant une coupure d’enregistrement, la position précédente est conservée ; une course terminée reste à l’arrivée. Retirer un run ne supprime pas sa référence.
+
+## Conversion GPX
+
+L’écran dédié affiche les informations du fichier avant conversion, sa carte et son profil. Le mode compact retire le XML superflu tout en conservant les extensions ; le mode allégé pour simulation retire les extensions de capteurs ; le mode original vérifie le fichier. Le traitement conserve points, altitudes, temps, segments et repères : il ne réduit pas le nombre de points et n’invente pas d’horodatages.
+
+Le bilan indique tailles avant/après, réduction et compatibilité d’import. Une source peut atteindre 100 Mio ; le résultat doit rester à 20 Mio ou moins pour être analysé. Un fichier encore trop volumineux peut être téléchargé. Si la conversion agrandit le fichier, l’original est conservé. Pour plusieurs fichiers, l’aperçu concerne le dernier ; les 20 derniers bilans téléchargeables restent liés à la session de page.
+
+## Garmin : importer, arrêter et supprimer
+
+Dans les sources, installer `requirements-garmin.txt` avec Python 3.10 ou supérieur dans l’environnement utilisé pour lancer l’application. Le paquet Windows inclut déjà le connecteur. Saisir le compte, se connecter et répondre à la demande MFA si nécessaire. Mot de passe, code et session restent uniquement en mémoire ; une nouvelle connexion est nécessaire après arrêt du serveur.
+
+Les critères comprennent activité (course, vélo, randonnée ou tous), kilomètres minimum/maximum, dates minimum/maximum, famille de relief et classe de distance. Les bornes renseignées sont inclusives. Les distances déclarées par Garmin servent au filtre kilométrique ; les profils et classes proviennent de l’analyse GPX. Randonnée inclut marche et alpinisme reconnus. Les courses à pied peuvent devenir références ; les autres activités restent exclues sauf sélection explicite.
+
+Les activités inchangées sont ignorées, les révisions mises à jour et le choix d’inclusion conservé. Arrêter l’import agit entre deux requêtes ou enregistrements : l’appel réseau en cours doit se terminer. Les imports déjà enregistrés restent disponibles et alimentent la mise à jour des modèles.
+
+La suppression totale ou filtrée concerne les imports locaux, selon les mêmes critères ; elle ne supprime ni les fichiers natifs de références ni les activités du compte Garmin. Une déconnexion conserve les imports locaux. L’état de connexion et les erreurs distinguent dépendance absente, version incompatible, réseau, délai et réponses HTTP 401/403/429. Une authentification réelle Garmin n’a pas été validée sur ce poste ; les essais utilisent un client simulé et vérifient séparément le chargement des dépendances.
+
+## Sauvegarder
+
+1. Ouvrir l’application dans l’ancien navigateur si des scénarios antérieurs à la version 3.0 doivent être migrés.
+2. Aller dans Sauvegarde et restauration, puis Créer une sauvegarde complète.
+3. Télécharger le ZIP et en copier une version sur un autre support ou un stockage distant personnel.
+
+L’archive capture un instantané cohérent SQLite et l’état du navigateur courant : imports GPX/Garmin, sélection des références, caches et modèles, scénarios, réglages et repères. Elle inclut les références natives, parcours du projet et sources des nouveaux parcours analysés ou comparés. Les anciens parcours seulement ouverts avant cette version doivent être réimportés pour conserver leur GPX. Les secrets et sessions Garmin sont exclus. Le code de l’application se sauvegarde séparément par le dépôt de sources ou le paquet de diffusion.
+
+Une archive automatique est créée au premier démarrage réussi de chaque journée dans `local/sauvegardes`, sans suppression automatique des anciennes copies. Elle reste sur le même disque : conserver également une copie externe. Les ZIP ne sont pas chiffrés ; choisir un emplacement personnel protégé. Ne pas remplacer ce mécanisme par une copie des fichiers SQLite pendant leur utilisation.
+
+## Restaurer et reprendre
+
+1. Dans l’installation cible, ouvrir Sauvegarde et restauration et sélectionner le ZIP.
+2. Vérifier l’aperçu, sa date et sa version, puis cliquer Restaurer les données. Cette action remplace les données courantes.
+3. Attendre la fin de restauration et, si nécessaire, la reconstruction des modèles.
+4. Vérifier références, scénarios, réglages et repères ; utiliser Reprendre le dernier parcours pour rouvrir sa source conservée.
+
+Avant remplacement, l’application vérifie manifeste, tailles, empreintes SHA-256, chemins autorisés et intégrité SQLite. Elle refuse notamment chemins traversants, liens symboliques, doublons et objets SQLite inattendus. Limites : ZIP 2 Gio, décompression 4 Gio, 10 000 entrées et état utilisateur 40 Mio. Une copie avant-restauration est créée ; une erreur de remplacement déclenche un retour arrière.
+
+Les clés des références sont adaptées au dossier cible. Les modèles peuvent être reconstruits après changement de chemin ou de code ; un échec d’apprentissage ne signifie pas que les données restaurées sont perdues : l’application signale la situation. Éviter toute seconde instance sur les mêmes données. Le paquet Windows utilise un dossier différent des sources ; la sauvegarde/restauration permet le transfert.
+
+## Limites des estimations
+
+Les temps restent des estimations personnelles, dépendantes du nombre, de la diversité et de la qualité des références. Les pauses estimées sont déjà incluses dans la durée apprise ; ne pas les ajouter une seconde fois. La technicité, le sol, la météo, la fatigue et l’altitude physiologique ne sont pas explicitement modélisés. Les réglages de stratégie sont des hypothèses de simulation, pas des gains sportifs démontrés. Voir le guide Modèle pour les règles et les résultats historiques.
+
+## Annexes des documents d’origine
+
+Contenu conservé pour traçabilité. Les indications de version, mesures, limites et emplacements historiques s’interprètent à leur date ; les sections principales ci-dessus font foi pour la version actuelle.
+
+<a id="source-fonctionnel"></a>
+
+<details>
+<summary>FONCTIONNEL.md — document source intégral</summary>
+
 # Guide fonctionnel
 
 ## Objectif et périmètre
@@ -81,7 +185,7 @@ Le tableau compare le temps GPX au temps estimé en retirant cette course des r�
 
 La version 2.0 distingue cinq classes de distance : moins de 20 km, 20 à moins de 50 km, 50 à moins de 100 km, 100 à moins de 160 km et 160 km ou plus.
 
-Les familles sont : Plat / Vallonné, Intermédiaire / Montagne, Dents de scie et Mixte. Les six morphologies initiales restent utilisées pour décrire les parcours et conserver leurs pas d’analyse. Le calcul utilise une grille commune de 25 m, un lissage médian et un seuil d’inversion de 10 m. Il décrit séparément densité de D+, longueur, amplitude et fréquence des ascensions ainsi que leur répartition. Les règles détaillées et les pas d’échantillonnage figurent dans [le guide du modèle 2.0](MODELE-2.0.md).
+Les familles sont : Plat / Vallonné, Intermédiaire / Montagne, Dents de scie et Mixte. Les six morphologies initiales restent utilisées pour décrire les parcours et conserver leurs pas d’analyse. Le calcul utilise une grille commune de 25 m, un lissage médian et un seuil d’inversion de 10 m. Il décrit séparément densité de D+, longueur, amplitude et fréquence des ascensions ainsi que leur répartition. Les règles détaillées et les pas d’échantillonnage figurent dans [le guide du modèle 2.0](MODELE.md#source-modele-2-0).
 
 Les détails des références et de la prédiction affichent ces indicateurs. Les classements et l’histogramme utilisent les 20 groupes famille–distance. L’histogramme est sélectionnable et donne accès aux courses du groupe. Les autres écrans et fonctions sont conservés.
 
@@ -157,7 +261,7 @@ Saisir la distance cumulée depuis le départ en kilomètres et un commentaire f
 
 ## Import Garmin
 
-Consulter le [guide Garmin](GARMIN.md) pour les prérequis, les filtres de sélection, la conservation et la suppression locale. Les données importées restent disponibles hors connexion.
+Consulter le [guide Garmin](FONCTIONNEL.md#source-garmin) pour les prérequis, les filtres de sélection, la conservation et la suppression locale. Les données importées restent disponibles hors connexion.
 
 ## Version 1.2 : navigation en trois écrans
 
@@ -227,11 +331,11 @@ La carte et les modes de comparaison enregistrée ou de durée/allure manuelle r
 
 ## Migration vers 2.0
 
-La reclassification et le recalcul des modèles se font au redémarrage, avec la surveillance existante. Les imports, sélections, scénarios et GPX sont conservés. Les scénarios déjà enregistrés restent inchangés ; les recalculer en créant de nouveaux runs pour comparer l’ancien et le nouveau résultat. Les règles de segmentation de la section historique « Version 1.3 » sont remplacées par le [modèle 2.0](MODELE-2.0.md).
+La reclassification et le recalcul des modèles se font au redémarrage, avec la surveillance existante. Les imports, sélections, scénarios et GPX sont conservés. Les scénarios déjà enregistrés restent inchangés ; les recalculer en créant de nouveaux runs pour comparer l’ancien et le nouveau résultat. Les règles de segmentation de la section historique « Version 1.3 » sont remplacées par le [modèle 2.0](MODELE.md#source-modele-2-0).
 
 ## Version 2.1
 
-Les fusions, les pas conservés, le filtre visuel de l’histogramme et l’ouverture des détails sont décrits dans [le guide 2.1](MODELE-2.1.md). Les fonctions et descriptions historiques de la version 2.0 restent documentées dans leur contexte. Le classement élargi utilise des retours à la ligne et une présentation mobile adaptée.
+Les fusions, les pas conservés, le filtre visuel de l’histogramme et l’ouverture des détails sont décrits dans [le guide 2.1](MODELE.md#source-modele-2-1). Les fonctions et descriptions historiques de la version 2.0 restent documentées dans leur contexte. Le classement élargi utilise des retours à la ligne et une présentation mobile adaptée.
 
 ## Largeur commune — version 2.1.1
 
@@ -320,4 +424,84 @@ Le bloc Stratégie d’allure du parcours est placé dans Analyse, avant Calcule
 
 ## PrédicTrail — version 3.0.0
 
-Le nom de l’application devient PrédicTrail, par BZHAventure. L’écran Sauvegarde et restauration exporte une archive complète, vérifie un ZIP puis restaure ses données avec une copie de sécurité. Les scénarios et réglages sont désormais synchronisés dans la base locale ; les anciens stockages du navigateur sont repris à la première ouverture. Les nouveaux parcours analysés ou simulés sont conservés localement pour être inclus dans la sauvegarde et permettre la reprise du dernier parcours. Aucun identifiant Garmin n’est sauvegardé. Les détails et limites sont décrits dans [le guide de sauvegarde](SAUVEGARDES.md) et [le guide Windows](DEMARRAGE-WINDOWS.md).
+Le nom de l’application devient PrédicTrail, par BZHAventure. L’écran Sauvegarde et restauration exporte une archive complète, vérifie un ZIP puis restaure ses données avec une copie de sécurité. Les scénarios et réglages sont désormais synchronisés dans la base locale ; les anciens stockages du navigateur sont repris à la première ouverture. Les nouveaux parcours analysés ou simulés sont conservés localement pour être inclus dans la sauvegarde et permettre la reprise du dernier parcours. Aucun identifiant Garmin n’est sauvegardé. Les détails et limites sont décrits dans [le guide de sauvegarde](FONCTIONNEL.md#source-sauvegardes) et [le guide Windows](ARCHITECTURE.md#source-demarrage-windows).
+
+</details>
+
+<a id="source-garmin"></a>
+
+<details>
+<summary>GARMIN.md — document source intégral</summary>
+
+# Import Garmin Connect
+
+## Installation facultative
+
+Utiliser Python 3.10 ou supérieur (la machine de validation utilise Python 3.9 pour le cœur de l’application). Depuis le dossier du projet :
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements-garmin.txt
+.\.venv\Scripts\python lancer.py
+```
+
+Cet exemple nécessite Python 3.12 installé. La dépendance est fixée à `garminconnect==0.2.38`. Le [projet communautaire](https://github.com/cyberjunky/python-garminconnect/tree/0.2.38) et ses [prérequis Python](https://github.com/cyberjunky/python-garminconnect/blob/0.2.38/pyproject.toml) constituent les références de cette intégration. Il s’agit d’un connecteur de compte personnel, dont la compatibilité dépend des services Garmin.
+
+## Utilisation
+
+1. Dans la bibliothèque locale, saisir l’adresse du compte et son mot de passe puis se connecter.
+2. Si Garmin le demande, saisir le code MFA. Les secrets et jetons restent uniquement dans la mémoire du serveur ; une nouvelle connexion est nécessaire après son arrêt.
+3. Choisir course, vélo, randonnée ou tous les types, les distances minimale et maximale et les dates minimale et maximale. Les bornes sont incluses. Une borne vide n’impose pas cette limite.
+4. Lancer l’import. Seules les activités avec une trace GPX chronométrée exploitable sont conservées ; les erreurs sont signalées par activité.
+5. Les nouvelles courses à pied peuvent devenir références automatiquement. Le vélo et la randonnée restent stockés sans participer au modèle, sauf sélection explicite dans la liste.
+
+Les distances des filtres sont celles déclarées par Garmin. Le type randonnée inclut la marche et l’alpinisme reconnus par le connecteur. Un nouvel import ignore les activités inchangées et télécharge à nouveau celles dont les métadonnées de révision ont changé. Une modification conserve le choix précédent d’utilisation comme référence. Les contenus GPX identiques ne sont pas dupliqués.
+
+## Suppression et conservation
+
+Les boutons de suppression permettent d’effacer tous les imports locaux ou uniquement ceux correspondant aux critères courants. Une confirmation précise le nombre concerné. Les fichiers du dossier `data/references` et les activités du compte Garmin ne sont pas supprimés. Les modèles sont actualisés après une suppression de références.
+
+La base `data/local/bzhaventure.sqlite3` conserve les imports entre deux démarrages. Elle n’est pas versionnée ; la sauvegarder serveur arrêté. La déconnexion libère la session en mémoire et conserve les activités importées.
+
+## Validation
+
+Les scénarios de connexion, MFA, filtrage, mise à jour et suppression sont testés avec un client simulé. Aucune connexion à un compte Garmin réel n’a été effectuée pendant la validation. Le connecteur optionnel n’est pas installé sur la machine Python 3.9 utilisée pour ces tests.
+
+## Dépannage vérifié avec Python 3.15.2 (version 1.2.3)
+
+Sur cette machine, après le retrait de Python 3.9, le connecteur n’était pas installé dans Python 3.15.2. La commande `python` pointait aussi sur un alias Windows inaccessible et l’ancien lanceur `py` ne détectait pas cette installation. Un environnement `.venv` a été créé dans le projet et `requirements-garmin.txt` y a été installé. Les imports du connecteur, son statut disponible et `pip check` ont été vérifiés avec cet environnement.
+
+Démarrer par double-clic sur **Demarrer-BZHAventure.cmd**, ou depuis le dossier du projet :
+
+```powershell
+.\.venv\Scripts\python.exe lancer.py
+```
+
+Cette commande utilise le Python et les dépendances du projet. Arrêter auparavant l’ancien serveur avec Ctrl+C, puis recharger le navigateur avec Ctrl+F5. L’état Garmin est affiché en dehors du panneau dépliable. Le panneau de connexion est ouvert par défaut. Les erreurs distinguent désormais dépendance absente, version incompatible, erreur réseau, délai dépassé et réponses HTTP 401, 403 ou 429, sans exposer les secrets.
+
+La validation locale confirme le chargement du connecteur, pas l’authentification d’un compte réel : celle-ci doit être réessayée dans l’interface avec les identifiants du titulaire et, si demandé, son code MFA. Ne pas communiquer ces secrets dans le chat.
+
+</details>
+
+<a id="source-sauvegardes"></a>
+
+<details>
+<summary>SAUVEGARDES.md — document source intégral</summary>
+
+# Sauvegardes PrédicTrail
+
+L’écran Sauvegarde et restauration crée une archive ZIP complète et permet de la télécharger. Il reprend les scénarios et réglages du navigateur affiché avant de prendre un instantané cohérent de la base SQLite. Les scénarios sont également synchronisés dans la base locale ; les anciennes données IndexedDB/localStorage sont migrées à la première ouverture dans le navigateur concerné.
+
+L’archive contient : base SQLite (imports GPX/Garmin, choix des références, caches de référence et modèles, scénarios et réglages), GPX natifs de référence, parcours du projet et GPX des nouveaux parcours analysés ou comparés. Les anciens parcours uniquement ouverts avant cette version doivent être réimportés pour que leur GPX source soit conservé. Le dernier parcours conservé peut être repris après restauration. Les identifiants, mots de passe, codes MFA et sessions Garmin restent en mémoire et sont exclus.
+
+Une sauvegarde locale automatique est créée au premier démarrage réussi de chaque journée ; elles sont conservées sans suppression automatique. Les copies locales se trouvent à côté de la base dans local/sauvegardes. Elles ne remplacent pas une copie sur disque externe ou sur un stockage distant choisi par l’utilisateur. L’archive n’est pas chiffrée : la conserver dans un emplacement personnel protégé.
+
+## Restauration
+
+Sélectionner le ZIP puis vérifier la date et la version présentées. L’application vérifie la liste des fichiers, les limites de taille, les chemins autorisés et les empreintes SHA-256 avant remplacement. Au clic Restaurer, la base SQLite est contrôlée et une archive avant-restauration est créée. Les fichiers et la base sont remplacés avec retour arrière si un remplacement échoue. Les clés des références sont adaptées au nouveau dossier. Les modèles sont recalculés si nécessaire ; un échec d’apprentissage n’annule pas une restauration de données réussie.
+
+Restaurer remplace les données courantes ; ne pas lancer simultanément deux instances de l’application sur le même dossier de données. Limites : ZIP 2 Gio, contenu décompressé 4 Gio, 10 000 entrées ; état scénarios/réglages 40 Mio. La copie de l’ensemble du dossier sans fermeture du programme ne remplace pas ce mécanisme d’instantané SQLite.
+
+Une sauvegarde manuelle prise depuis un navigateur donné capture ses scénarios ; ouvrir l’application dans l’ancien navigateur avant la première migration pour reprendre ses données. Le dossier de données du paquet Windows est séparé de celui du projet source : transférer les données par sauvegarde/restauration.
+
+</details>

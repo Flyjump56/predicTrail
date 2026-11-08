@@ -13,7 +13,7 @@ for name in ("lancer.py","predire.py","Demarrer-BZHAventure.cmd","requirements-g
 (target/"assets").mkdir()
 for name in ("logo-bzhaventure.png","thème.jpg"):shutil.copy2(root/"assets"/name,target/"assets"/name)
 (target/"docs").mkdir()
-for name in ("FONCTIONNEL.md","ARCHITECTURE.md","GARMIN.md","MODELE-2.1.md","MODELE-2.0.md","DEMARRAGE-WINDOWS.md","DIFFUSION.md","SAUVEGARDES.md"):
+for name in ("ARCHITECTURE.md","FONCTIONNEL.md","MODELE.md"):
     shutil.copy2(root/"docs"/name,target/"docs"/name)
 make_demo(target/"data"/"references")
 (target/".gitignore").write_text(".venv/\nvenv/\n__pycache__/\n*.py[cod]\nbuild/\ndist/\nbackups/\nsorties/\ndata/local/\ndata/parcours/\ndata/references/*\n!data/references/Demonstration-fictive-1.gpx\n!data/references/Demonstration-fictive-2.gpx\n!data/references/Demonstration-fictive-3.gpx\n*.spec\n",encoding="utf-8")
@@ -34,12 +34,12 @@ Les GPX inclus sont des démonstrations fictives, sans activité personnelle. Re
 
 ## Windows autonome
 
-Consulter [le guide Windows](docs/DEMARRAGE-WINDOWS.md) et [la construction du paquet](docs/DIFFUSION.md).
+Consulter [Architecture, déploiement et démarrage](docs/ARCHITECTURE.md).
 Le paquet Windows contient Python et les dépendances. Sources testées avec Python 3.15.2.
 
 ## Sauvegardes
 
-Utiliser l’écran Sauvegarde et restauration et conserver une copie externe du ZIP. Les données utilisateur ne sont pas publiées dans ce dépôt. Voir [le guide](docs/SAUVEGARDES.md).
+Utiliser l’écran Sauvegarde et restauration et conserver une copie externe du ZIP. Les données utilisateur ne sont pas publiées dans ce dépôt. Voir [Fonctionnel, sauvegarde et restauration](docs/FONCTIONNEL.md).
 
 ## Tests
 
@@ -47,7 +47,8 @@ Utiliser l’écran Sauvegarde et restauration et conserver une copie externe du
 
 ## Documentation
 
-[Guide fonctionnel](docs/FONCTIONNEL.md) · [Modèle](docs/MODELE-2.1.md) · [Garmin](docs/GARMIN.md).
+[Architecture, déploiement et démarrage](docs/ARCHITECTURE.md) · [Fonctionnel, sauvegarde et restauration](docs/FONCTIONNEL.md) · [Modèle](docs/MODELE.md).
+Les trois guides incluent la correspondance des 23 anciens documents et leurs annexes historiques intégrales.
 Aucune licence open source n’a encore été choisie par l’auteur.
 """,encoding="utf-8")
 # Une copie de l’historique de travail n’est jamais incluse.

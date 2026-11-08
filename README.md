@@ -15,12 +15,12 @@ Les GPX inclus sont des démonstrations fictives, sans activité personnelle. Re
 
 ## Windows autonome
 
-Consulter [le guide Windows](docs/DEMARRAGE-WINDOWS.md) et [la construction du paquet](docs/DIFFUSION.md).
+Consulter [Architecture, déploiement et démarrage](docs/ARCHITECTURE.md).
 Le paquet Windows contient Python et les dépendances. Sources testées avec Python 3.15.2.
 
 ## Sauvegardes
 
-Utiliser l’écran Sauvegarde et restauration et conserver une copie externe du ZIP. Les données utilisateur ne sont pas publiées dans ce dépôt. Voir [le guide](docs/SAUVEGARDES.md).
+Utiliser l’écran Sauvegarde et restauration et conserver une copie externe du ZIP. Les données utilisateur ne sont pas publiées dans ce dépôt. Voir [Fonctionnel, sauvegarde et restauration](docs/FONCTIONNEL.md).
 
 ## Tests
 
@@ -28,5 +28,6 @@ Utiliser l’écran Sauvegarde et restauration et conserver une copie externe du
 
 ## Documentation
 
-[Guide fonctionnel](docs/FONCTIONNEL.md) · [Modèle](docs/MODELE-2.1.md) · [Garmin](docs/GARMIN.md).
+[Architecture, déploiement et démarrage](docs/ARCHITECTURE.md) · [Fonctionnel, sauvegarde et restauration](docs/FONCTIONNEL.md) · [Modèle](docs/MODELE.md).
+Les trois guides incluent la correspondance des 23 anciens documents et leurs annexes historiques intégrales.
 Aucune licence open source n’a encore été choisie par l’auteur.
