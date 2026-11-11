@@ -135,6 +135,20 @@ vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/bzhaventure/web/back
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function settle() { for(let i=0;i<8;i++) await tick(); }
 async function run() {
+  await vm.runInContext(`(async () => {
+    const pending = [];
+    const job = processGpxFiles(['A','B','C'].map(name => ({name})),file =>
+      new Promise((resolve,reject) => pending.push({name:file.name,resolve,reject})));
+    if (pending.map(p => p.name).join('') !== 'AB') throw Error('Deux fichiers doivent démarrer ensemble.');
+    pending[1].reject(Error('GPX invalide'));
+    await Promise.resolve();
+    if (pending[2]?.name !== 'C') throw Error('Le lot doit continuer après un échec.');
+    pending[2].resolve('C');
+    pending[0].resolve('A');
+    const results = await job;
+    if (results[0].value !== 'A' || !results[1].error.startsWith('B') || results[2].value !== 'C')
+      throw Error('Les résultats doivent suivre l’ordre de sélection.');
+  })()`,context);
   await settle();
   assert(get('cache-info').textContent.includes('16 / 16'));
   assert(get('garmin-overview').textContent.includes('Facultatif'));
@@ -356,7 +370,9 @@ async function run() {
   const focused=vm.runInContext(`(() => {
     referenceMapData.courses.push({key:'two',name:'Autre course',enabled:true,trace:[[[42,1],[42.2,1.2]]],
       classification:{profile:'sawtooth',profileLabel:'Dent de scie',distance:12000,distanceLabel:'Moins de 20 km'},
-      summary:{distance:12000,ascent:900,descent:850},duration:7200,recordedStart:'2026-01-01T06:00:00Z'});
+      summary:{distance:12000,ascent:900,descent:850,profile:[[[0,100],[12000,150]]]},
+      terrain:[{name:'Montée',distance:12000,actual:7000,estimated:null}],unassigned:200,
+      pauses:{duration:120,count:1,unobserved:200},duration:7200,recordedStart:'2026-01-01T06:00:00Z'});
     window.L=true;L={latLngBounds:points=>points};
     referenceMap={invalidateSize(){},fitBounds(bounds){this.bounds=bounds}};
     selectReferenceCourse('two');const result=referenceMap.bounds;
@@ -365,6 +381,12 @@ async function run() {
   assert.equal(focused[0][0],42);assert.equal(focused[1][1],1.2);
   assert(!get('reference-course-details').hidden);assert.equal(get('reference-course-select').value,'two');
   assert(get('reference-course-info').children.some(n=>n.children.some(c=>c.textContent.includes('Dents de scie'))));
+  const courseAnalysis = get('reference-course-analysis').children;
+  assert.deepEqual(courseAnalysis.map(section=>section.children[0].textContent),
+    ['Profil et dénivelé','Montée, plat et descente','Pauses et enregistrement GPX']);
+  assert(courseAnalysis[0].children[1].children.some(node=>node.tag==='svg'));
+  assert(courseAnalysis[1].children[1].children[0].children[1].rows[0].cells.some(cell=>cell.textContent==='Temps GPX'));
+  assert(courseAnalysis[2].children[1].children.some(metric=>metric.children.some(node=>node.textContent==='00:02:00')));
 
   get('tab-backups').events.click();assert(!get('screen-backups').hidden);
   await get('backup-create').events.click();assert(centralState.runs.length>0);
@@ -373,6 +395,34 @@ async function run() {
   assert(get('backup-download').children[0].href.includes('/api/backup/download'));
   get('backup-file').files=[{name:'sauvegarde.zip',size:100}];await get('backup-file').events.change();
   assert(!get('backup-restore').disabled);assert(get('backup-preview').textContent.includes('4 fichiers'));
+  vm.runInContext(`(() => {
+    const saved = runs;
+    const mark = (distance,label) => [distance,distance/2,48,2,100,label];
+    runs = [
+      {name:'Crêtes',file:'cretes.gpx',routeKey:'a',data:{
+        marks:[mark(0,'Départ'),mark(1500,'Passage'),mark(2000,'Arrivée')],
+        sections:[
+          {distance:0,endDistance:1000,start:[48,2,100],end:[48,2,200]},
+          {distance:1000,endDistance:2000,start:[48,2,400],end:[48,2,340]}
+        ],ascent:100,descent:60
+      }},
+      {name:'Vallée',file:'vallee.gpx',routeKey:'b',data:{
+        marks:[mark(0,'Départ'),mark(1000,'Passage'),mark(3000,'Arrivée')],
+        profile:[[[0,50],[1000,30],[3000,60]]],ascent:30,descent:20
+      }}
+    ];
+    renderRunPassages();
+    runs = saved;
+  })()`,context);
+  const passages = get('simulation-marks').rows;
+  assert.equal(get('simulation-marks-head').rows[0].cells.length,3);
+  assert.equal(passages.length,4);
+  assert.equal(passages[1].cells[1].textContent,'—');
+  assert.equal(passages[1].cells[2].textContent,'1,00 km · D+ 0 m · D− 20 m');
+  assert.equal(passages[2].cells[1].textContent,'1,50 km · D+ 100 m · D− 30 m');
+  assert.equal(passages[2].cells[2].textContent,'—');
+  assert.equal(passages[3].cells[1].textContent,'2,00 km · D+ 100 m · D− 60 m');
+  assert.equal(passages[3].cells[2].textContent,'3,00 km · D+ 30 m · D− 20 m');
   console.log('Interface vérifiée · modèles filtrés, guide réactivable, conversion, comparaison synchronisée, curseur, vitesse, coloration, retrait des runs et fonctions existantes.');
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

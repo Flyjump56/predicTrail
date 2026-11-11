@@ -83,6 +83,12 @@ class MapTests(unittest.TestCase):
             self.assertEqual(len(report['courses']), 2)
             self.assertTrue(all(not c['enabled'] for c in report['courses']))
             self.assertTrue(all(len(c['trace'][0]) > 1 for c in report['courses']))
+            for course in report['courses']:
+                self.assertTrue(course['summary']['profile'])
+                self.assertEqual([row['name'] for row in course['terrain']], ['Montée', 'Plat', 'Descente'])
+                self.assertAlmostEqual(sum(row['distance'] for row in course['terrain']), course['summary']['distance'])
+                self.assertAlmostEqual(sum(row['actual'] for row in course['terrain']) + course['unassigned'], course['duration'])
+                self.assertIn('unobserved', course['pauses'])
             self.assertEqual(store.reference_sources(refs), [])
             self.assertEqual(report['skipped'], [])
 
@@ -100,24 +106,35 @@ class CancelImportTests(unittest.TestCase):
         self.assertTrue(operation.cancel_event.is_set())
         self.assertTrue(replies[0]['stopping'])
 
-    def test_stop_keeps_completed_imports_and_skips_remaining_downloads(self):
+    def test_stop_keeps_completed_imports_during_the_next_download(self):
         connection = GarminConnection(factory=FakeGarmin)
         connection.connect('test@example.com','test-only')
         connection.complete_mfa('123456')
         cancel = Event()
+        second_download = Event()
         with tempfile.TemporaryDirectory() as folder:
             store = Store(Path(folder)/'local.sqlite3')
             save = store.save_activity
+            download = connection.client.download_activity
+            def download_and_wait(*args, **kwargs):
+                if connection.client.downloads:
+                    second_download.set()
+                    if not cancel.wait(5):
+                        raise RuntimeError("Le premier GPX n'a pas été traité pendant le téléchargement suivant.")
+                return download(*args, **kwargs)
             def save_and_stop(*args):
+                if not second_download.wait(5):
+                    raise RuntimeError("Le téléchargement suivant n'a pas démarré.")
                 result = save(*args)
                 cancel.set()
                 return result
-            with patch.object(store,'save_activity',side_effect=save_and_stop):
+            with patch.object(store,'save_activity',side_effect=save_and_stop), \
+                 patch.object(connection.client,'download_activity',side_effect=download_and_wait):
                 result = connection.import_activities(store,validate_filters({}),True,lambda *args:None,cancel)
             self.assertTrue(result['cancelled'])
             self.assertEqual(result['imported'], 1)
             self.assertEqual(len(store.list_activities()), 1)
-            self.assertEqual(len(connection.client.downloads), 1)
+            self.assertEqual(len(connection.client.downloads), 2)
 
     def test_stop_interrupts_activity_list_between_pages(self):
         cancel = Event()

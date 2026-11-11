@@ -1,4 +1,5 @@
 """Import personnel Garmin Connect via le connecteur communautaire facultatif."""
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 import hashlib
 import json
@@ -185,37 +186,58 @@ class GarminConnection:
                     selection_errors.append("Activité Garmin sans métadonnées exploitables")
             report = dict(imported=0, existing=0, errors=selection_errors, selected=len(selected), filtered=0)
             existing = {row["id"]: row for row in store.list_activities()}
-            for i, activity in enumerate(selected):
+            def process(activity, data):
                 if cancel_event.is_set():
-                    break
-                progress("import", activity["name"], i / max(1, len(selected)), i, len(selected))
-                activity["id"] = "garmin-" + self.account + "-" + activity["id"]
-                if activity["id"] in existing and existing[activity["id"]]["revision"] == activity["revision"]:
-                    report["existing" if matches(existing[activity["id"]],filters) else "filtered"] += 1
-                    continue
-                remote_id = activity["id"].rsplit("-", 1)[-1]
+                    return None
+                course = read_gpx(BytesIO(data), timed=True)
+                if elapsed(course) <= 0:
+                    raise ValueError("Horodatages inutilisables")
+                descriptor = describe_course(course)
+                activity.update(profile=descriptor["profile"], distanceClass=descriptor["distanceClass"])
+                if not matches(activity, filters):
+                    return "filtered"
+                activity.update(source="garmin", reference=bool(use_running and activity["kind"] == "running"))
+                if cancel_event.is_set():
+                    return None
+                return "imported" if store.save_activity(activity, data, descriptor) else "existing"
+
+            def collect(pending):
+                if pending is None:
+                    return
+                name, future = pending
                 try:
-                    data = self.client.download_activity(
-                        remote_id, dl_fmt=self.client.ActivityDownloadFormat.GPX)
+                    result = future.result()
+                    if result:
+                        report[result] += 1
+                except Exception:
+                    report["errors"].append(name + " · GPX horodaté indisponible ou enregistrement échoué")
+
+            # Le client Garmin reste sur ce fil ; une seule trace précédente est en traitement.
+            pending = None
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                for i, activity in enumerate(selected):
                     if cancel_event.is_set():
                         break
-                    course = read_gpx(BytesIO(data), timed=True)
-                    if elapsed(course) <= 0:
-                        raise ValueError("Horodatages inutilisables")
-                    descriptor = describe_course(course)
-                    if cancel_event.is_set():
-                        break
-                    activity.update(profile=descriptor['profile'],distanceClass=descriptor['distanceClass'])
-                    if not matches(activity,filters):
-                        report['filtered'] += 1
+                    progress("import", activity["name"], i / max(1, len(selected)), i, len(selected))
+                    remote_id = activity["id"]
+                    activity["id"] = "garmin-" + self.account + "-" + remote_id
+                    previous = existing.get(activity["id"])
+                    if previous and previous["revision"] == activity["revision"]:
+                        report["existing" if matches(previous, filters) else "filtered"] += 1
                         continue
-                    activity.update(source="garmin",
-                                    reference=bool(use_running and activity["kind"] == "running"))
-                    # Le filtre kilométrique s'applique aux distances Garmin, déjà sélectionnées.
-                    report["imported" if store.save_activity(activity, data, descriptor) else "existing"] += 1
-                except Exception as error:
-                    report["errors"].append(activity["name"] + " · GPX horodaté indisponible ou téléchargement échoué")
-                    if type(error).__name__ in ("GarminConnectTooManyRequestsError", "GarminConnectAuthenticationError"):
+                    try:
+                        data = self.client.download_activity(
+                            remote_id, dl_fmt=self.client.ActivityDownloadFormat.GPX)
+                    except Exception as error:
+                        report["errors"].append(activity["name"] + " · téléchargement GPX échoué")
+                        if type(error).__name__ in ("GarminConnectTooManyRequestsError", "GarminConnectAuthenticationError"):
+                            break
+                        continue
+                    collect(pending)
+                    pending = None
+                    if cancel_event.is_set():
                         break
+                    pending = activity["name"], executor.submit(process, activity, data)
+                collect(pending)
             report["cancelled"] = cancel_event.is_set()
             return report

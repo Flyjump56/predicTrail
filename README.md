@@ -18,6 +18,11 @@ Les GPX inclus sont des démonstrations fictives, sans activité personnelle. Re
 Consulter [Architecture, déploiement et démarrage](docs/ARCHITECTURE.md).
 Le paquet Windows contient Python et les dépendances. Sources testées avec Python 3.15.2.
 
+## Mode serveur avec comptes
+
+Initialiser l’administrateur avec `python lancer_serveur.py --init-admin admin`, puis lancer `python lancer_serveur.py --port 8766`.
+Voir le [guide du mode serveur](docs/ARCHITECTURE.md#mode-serveur-avec-comptes) pour créer les utilisateurs et préparer l’accès HTTPS.
+
 ## Sauvegardes
 
 Utiliser l’écran Sauvegarde et restauration et conserver une copie externe du ZIP. Les données utilisateur ne sont pas publiées dans ce dépôt. Voir [Fonctionnel, sauvegarde et restauration](docs/FONCTIONNEL.md).

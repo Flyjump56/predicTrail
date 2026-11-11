@@ -86,12 +86,13 @@ def pause_summary(path, course):
     return dict(duration=sum(stops), count=len(stops), unobserved=unobserved)
 
 
-def read_references(progress=None, store=None):
+def read_references(progress=None, store=None, directory=None):
     """Charger les références modifiées et restaurer les autres depuis le cache."""
     names, courses, pauses, skipped = [], [], [], []
-    paths = [path for path in sorted(REFERENCES.iterdir()) if path.suffix.lower() == ".gpx" and path.is_file()]
-    sources = store.reference_sources(REFERENCES) if store else [
-        dict(key=str(path), name=path.stem, path=path) for path in paths]
+    directory = REFERENCES if directory is None else directory
+    sources = store.reference_sources(directory) if store else [
+        dict(key=str(path), name=path.stem, path=path)
+        for path in sorted(directory.iterdir()) if path.suffix.lower() == ".gpx" and path.is_file()]
     reused = 0
     seen = set()
 

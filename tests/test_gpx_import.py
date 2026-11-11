@@ -79,4 +79,69 @@ class ImportTests(unittest.TestCase):
         for data, mode in [(b"<xml/>","compact"),(b"<!DOCTYPE gpx><gpx/>","compact"),(GPX,"bad"),(b"<gpx/>","compact")]:
             with self.assertRaises(ValueError): convert_gpx(data, mode)
 
+    def test_export_from_native_file_and_excluded_garmin_activity(self):
+        from base64 import b64decode
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from bzhaventure.server import Dashboard
+        from bzhaventure.storage import Store
+
+        source = GPX.replace(b">", b">" + b" " * 50)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            references = root / "references"
+            references.mkdir()
+            native = references / "course.gpx"
+            native.write_bytes(source)
+            outside = root / "autre.gpx"
+            outside.write_bytes(source)
+            store = Store(root / "local.sqlite3")
+            store.save_activity(dict(id="garmin:42", source="Garmin", name="Course Garmin",
+                                     kind="running", date="2026-01-01", distance=3000,
+                                     reference=False), source)
+            handler = Dashboard.__new__(Dashboard)
+            handler.server = SimpleNamespace(store=store)
+            responses = []
+            handler.send_json = responses.append
+            with patch("bzhaventure.server.REFERENCES", references):
+                handler.manage("/api/reference-gpx", dict(key="file:" + str(native.resolve()), mode="original"))
+                self.assertEqual(b64decode(responses.pop()["gpx"]), source)
+                handler.manage("/api/reference-gpx", dict(key="activity:garmin:42", mode="simulation"))
+                converted = responses.pop()
+                self.assertTrue(converted["report"]["recordedCompatible"])
+                self.assertIsNone(ET.fromstring(b64decode(converted["gpx"])).find(".//{urn:sensor}hr"))
+                handler.manage("/api/reference-gpx", dict(key="activity:garmin:42", mode="original"))
+                self.assertEqual(b64decode(responses.pop()["gpx"]), source)
+                with self.assertRaises(ValueError):
+                    handler.manage("/api/reference-gpx", dict(key="file:" + str(outside.resolve())))
+            self.assertEqual(native.read_bytes(), source)
+            self.assertFalse(store.list_activities()[0]["reference"])
+
+    def test_reference_batch_stores_valid_files_in_one_update(self):
+        from base64 import b64encode
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from bzhaventure.server import Dashboard
+        from bzhaventure.storage import Store
+
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "local.sqlite3")
+            handler = Dashboard.__new__(Dashboard)
+            handler.server = SimpleNamespace(store=store)
+            handler.send_json = lambda *args: None
+            files = [
+                dict(name=name, gpx=b64encode(data).decode())
+                for name, data in [("Premier", GPX), ("Invalide", b"bad"), ("Dernier", GPX + b"\n")]
+            ]
+            with patch("bzhaventure.server.start_update") as update:
+                handler.manage("/api/local/upload", dict(files=files))
+                update.assert_called_once()
+                report = update.call_args.args[1](lambda *args: None)
+            self.assertEqual(report["imported"], 2)
+            self.assertEqual(len(report["errors"]), 1)
+            self.assertIn("Invalide", report["errors"][0])
+            self.assertEqual(len(store.list_activities()), 2)
+
 if __name__ == "__main__": unittest.main()

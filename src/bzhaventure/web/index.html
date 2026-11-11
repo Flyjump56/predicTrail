@@ -27,6 +27,7 @@
 <button class="button" id="tab-conversion">⇄ Conversion GPX</button>
 <button class="button" id="tour-open">ⓘ Découvrir les fonctionnalités</button>
 <button class="button" id="tab-backups">⇩ Sauvegarde et restauration</button>
+<!-- admin-navigation -->
 </nav>
 <main>
 <section id="screen-backups" hidden aria-labelledby="backups-title"><h2 id="backups-title">Sauvegarder et restaurer mes données</h2>
@@ -175,12 +176,23 @@
   </section>
   <section class="screen-references" hidden aria-labelledby="reference-title">
     <h2 id="reference-title">Courses de référence</h2>
+    <!-- admin-reference-references -->
     <p class="muted">Classement séparé par profil de dénivelé et classe de distance. L’estimation de classement utilise uniquement les autres courses du même groupe.</p>
     <div class="controls"><label for="reference-sort">Classement
       <select id="reference-sort"><option value="performance">Performance · allure par km-effort</option><option value="fit">Proximité du modèle · erreur absolue</option><option value="name">Nom</option><option value="distance">Distance</option></select>
     </label></div>
     <p class="muted">Performance : durée / (km + D+/100), en min/km-effort ; valeur faible = performance élevée. La proximité utilise une validation sans la course évaluée. Les trois meilleures proximités sont mises en évidence dans chaque groupe. Sans autre référence du même groupe, l’estimation reste indisponible.</p>
-    <details><summary>Sélectionner les courses à prendre dans le modèle</summary><div class="scroll"><table><caption>Choix des fichiers participant au modèle · une modification relance le calcul</caption><thead><tr><th>Fichier</th><th>Inclure dans le modèle</th></tr></thead><tbody id="reference-selection"></tbody></table></div></details>
+    <div class="controls" id="reference-export-controls">
+      <label>Format d’export GPX des références et des imports
+        <select id="reference-gpx-mode">
+          <option value="original">Original</option>
+          <option value="compact">Compact · extensions conservées</option>
+          <option value="simulation">Allégé pour la simulation</option>
+        </select>
+      </label>
+    </div>
+    <p id="reference-gpx-status" role="status"></p>
+    <details id="reference-selection-panel"><summary>Sélectionner ou exporter les courses de référence</summary><div class="scroll"><table><caption>Choix des fichiers participant au modèle · une modification relance le calcul</caption><thead><tr><th>Fichier</th><th>Inclure dans le modèle</th><th>Export GPX</th></tr></thead><tbody id="reference-selection"></tbody></table></div></details>
     <h3>Répartition des références par profil et distance</h3>
     <figure id="reference-histogram" aria-label="Histogramme du nombre de références par profil et distance"></figure>
     <div id="histogram-legend" class="controls"></div>
@@ -202,13 +214,14 @@
       <p class="muted notice">Les courses sont regroupées selon cinq classes de distance et quatre profils de relief : Plat / Vallonné, Intermédiaire / Montagne, Dents de scie et Mixte. L’échantillonnage s’adapte au groupe et conserve les changements de relief significatifs. Les modèles de groupe sont combinés au modèle global, avec une contribution réduite quand les références du groupe sont rares. Les temps écoulés, pauses comprises, servent au recalage.</p>
     </details>
   </section>
-  <section class="screen-references" hidden aria-labelledby="library-title">
+  <section class="screen-references" id="reference-library-panel" hidden aria-labelledby="library-title">
     <h2 id="library-title">Références locales et Garmin Connect</h2>
     <div class="controls">
       <button class="button library-action" id="refresh-references" type="button">Vérifier et mettre à jour les références</button>
-      <button class="button library-action" id="upload-reference" type="button">Ajouter une référence GPX</button>
-      <input type="file" id="reference-file" accept=".gpx" hidden>
+      <button class="button library-action" id="upload-reference" type="button">Ajouter des références GPX</button>
+      <input type="file" id="reference-file" accept=".gpx" multiple hidden>
     </div>
+    <p class="muted">Jusqu’à 20 GPX et 60 Mio après conversion par lot. Le modèle est mis à jour après l’import du lot.</p>
     <p id="library-status" role="status">Les imports et les modèles sont conservés sur cet ordinateur.</p>
     <progress id="operation-progress" max="100" value="0" hidden aria-label="Avancement de l'opération"></progress>
     <p id="garmin-overview" role="status">Vérification du connecteur Garmin…</p>
@@ -254,11 +267,11 @@
     <p class="muted">La suppression concerne les imports locaux. Les fichiers du dossier data/references et les activités du compte Garmin sont conservés.</p>
     <div class="scroll">
       <table><caption>Activités importées sur cet ordinateur · filtrées selon les critères ci-dessus</caption>
-      <thead><tr><th>Date</th><th>Nom</th><th>Type</th><th>Profil</th><th>Classe de distance</th><th>Distance</th><th>Source</th><th>Référence du modèle</th></tr></thead>
+      <thead><tr><th>Date</th><th>Nom</th><th>Type</th><th>Profil</th><th>Classe de distance</th><th>Distance</th><th>Source</th><th>Référence du modèle</th><th>Export GPX</th></tr></thead>
       <tbody id="local-activities"></tbody></table>
     </div>
   </section>
-  <section class="screen-references" hidden aria-labelledby="model-title">
+  <section class="screen-references" id="reference-model-panel" hidden aria-labelledby="model-title">
     <h2 id="model-title">Modèle prédictif · vitesse selon la pente</h2>
     <p class="muted">Comparez les modèles par profil et distance. Les points orange représentent les allures médianes retenues pour l’apprentissage, converties en vitesse. La courbe verte représente le modèle retenu. Si la validation favorise le modèle global, la courbe du groupe reste visible en pointillés.</p>
     <div class="controls"><label for="model-select">Modèle affiché
@@ -292,11 +305,16 @@
     <h2 id="reference-map-title">Carte de toutes les courses de référence</h2>
     <p>Localisez les références retenues et exclues du modèle. Sélectionnez une course dans le sélecteur, la liste ou sur une trace pour centrer la carte et afficher ses informations.</p>
     <div id="reference-map-panel">
+    <!-- admin-reference-map -->
     <div class="controls"><button class="button" id="reference-map-fullscreen" type="button" aria-pressed="false"><span aria-hidden="true">⛶</span> Carte en plein écran</button>
     <button class="button" id="refresh-reference-map" type="button">Actualiser la carte</button>
       <label><input id="map-active-only" type="checkbox">Afficher uniquement les références retenues</label></div>
     <label for="reference-course-select">Sélectionner une course<select id="reference-course-select"><option value="">Toutes les courses</option></select></label>
-    <details id="reference-course-details" hidden open><summary>Informations de la course sélectionnée</summary><div id="reference-course-info" class="metrics reference-course-info"></div></details>
+    <details id="reference-course-details" hidden open>
+      <summary>Informations de la course sélectionnée</summary>
+      <div id="reference-course-info" class="metrics reference-course-info"></div>
+      <div id="reference-course-analysis"></div>
+    </details>
     <p id="reference-map-status" role="status"></p>
     <div id="reference-map" aria-label="Carte de toutes les courses de référence"></div>
     </div>
@@ -335,7 +353,8 @@
  <p id="simulation-clock" role="status"></p><div id="simulation-views"></div>
  <div id="simulation-chart"></div>
 
-    <div class="scroll"><table><caption>Temps cumulés et horaires aux repères communs (même parcours)</caption><thead id="simulation-marks-head"></thead><tbody id="simulation-marks"></tbody></table></div>
+    <div class="scroll"><table class="simulation-passages"><caption>Passages par course · distance, D+ et D− cumulés depuis le départ</caption><thead id="simulation-marks-head"></thead><tbody id="simulation-marks"></tbody></table></div>
+    <p class="muted">Les repères intermédiaires sont alignés par kilométrage. Un tiret indique qu’une course n’a pas de repère à cette distance. La ligne Arrivée donne le total propre à chaque course.</p>
   </section>
 </main>
 <div id="tour-panel" class="tour-overlay no-print" hidden>

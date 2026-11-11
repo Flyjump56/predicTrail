@@ -28,6 +28,35 @@ L’installation des dépendances Garmin est facultative pour le calcul local. L
 
 L’initialisation affiche ses étapes. Les modes durée, allure et temps enregistrés sont utilisables sans attendre les modèles. Les cartes en ligne et Garmin nécessitent Internet ; les calculs sont locaux et un tracé SVG sert de repli quand Leaflet est indisponible.
 
+<a id="mode-serveur-avec-comptes"></a>
+
+## Mode serveur avec comptes
+
+Le lanceur `lancer_serveur.py` démarre une instance distincte de la version locale. Créer une fois le compte administrateur, puis lancer le serveur depuis le même répertoire de données :
+
+```powershell
+.\.venv\Scripts\python.exe lancer_serveur.py --init-admin admin
+.\.venv\Scripts\python.exe lancer_serveur.py --port 8766
+```
+
+Ouvrir [le serveur de test local](http://127.0.0.1:8766), se connecter et ouvrir **Administration** pour créer les comptes. Le mot de passe initial est défini par l’administrateur. Chaque utilisateur peut le modifier depuis son espace. Les sessions expirent après douze heures et sont révoquées lors d’un changement de mot de passe.
+
+Le répertoire `.predictrail-server/` contient la base des comptes et un sous-dossier privé par utilisateur. Chaque sous-dossier contient les GPX, la base d’activités, les modèles, les scénarios et les sauvegardes du compte. Le navigateur utilise les réglages du serveur et l’ancienne bibliothèque locale reste distincte. `--data-dir` ou `PREDICTRAIL_SERVER_DATA` permet de placer l’ensemble sur un volume persistant. Protéger ce répertoire par les droits du système et l’inclure dans les sauvegardes d’exploitation.
+
+Pour transférer une bibliothèque locale, créer un ZIP complet dans la version locale. Sur le serveur arrêté, indiquer explicitement le compte destinataire et une archive de confiance :
+
+```powershell
+.\.venv\Scripts\python.exe lancer_serveur.py --restore-account admin --archive "D:\Sauvegardes\PredicTrail.zip"
+```
+
+Utiliser le même `--data-dir` qu’au lancement. Cette opération remplace les données de ce compte, crée une copie avant restauration et laisse la base des comptes séparée. L’utilisateur peut télécharger sa sauvegarde depuis l’application. La restauration ZIP en mode serveur passe par la commande de maintenance.
+
+Pour un accès distant, choisir un nom de domaine et configurer un proxy inverse HTTPS qui conserve l’en-tête `Host` public et transmet vers `127.0.0.1:8766`. Démarrer avec `--port 8766 --origin https://trail.example.org` en remplaçant le domaine d’exemple. Le serveur écoute sur la boucle locale. Les cookies de session utilisent l’attribut Secure avec une origine HTTPS. Vérifier l’accès via le proxy, les limites de transfert, l’espace disque, les sauvegardes et le nombre d’utilisateurs prévu avant l’ouverture. Le mode serveur se teste sur une seule instance de l’application.
+
+### Essai depuis un autre PC du réseau local
+
+Arrêter le serveur local. Relever l’IPv4 privée du PC serveur avec `ipconfig`, puis lancer par exemple `python lancer_serveur.py --port 8766 --lan 192.168.0.203`, en remplaçant l’adresse par celle du PC. Ouvrir cette même adresse et ce même port depuis l’autre PC. Utiliser un compte et un mot de passe de test pendant cet essai HTTP. Le pare-feu Windows doit autoriser le port sur le réseau privé local.
+
 ## Démarrer le paquet Windows
 
 Décompresser entièrement le ZIP Windows x64, puis ouvrir `PredicTrail.exe`. Conserver son dossier `_internal` et tous les fichiers livrés. Aucun Python externe n’est nécessaire. Les trois références fournies sont fictives. Le navigateur s’ouvre sur le serveur local ; fermer la console termine l’application.

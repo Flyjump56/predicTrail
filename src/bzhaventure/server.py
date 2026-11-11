@@ -36,6 +36,8 @@ import sqlite3
 import os
 from .backup import Backups, MAX_ARCHIVE, validate_state
 
+MAX_REFERENCE_BATCH = 3 * MAX_UPLOAD
+MAX_REFERENCE_FILES = 20
 
 # Liste fermée des ressources servies par HTTP.
 STATIC_FILES = {
@@ -44,6 +46,7 @@ STATIC_FILES = {
     "/assets/styles.css": (WEB_DIR / "styles.css", "text/css; charset=utf-8"),
     "/assets/backup.js": (WEB_DIR / "backup.js", "text/javascript; charset=utf-8"),
     "/assets/app.js": (WEB_DIR / "app.js", "text/javascript; charset=utf-8"),
+    "/assets/admin-progress.js": (WEB_DIR / "admin-progress.js", "text/javascript; charset=utf-8"),
 }
 
 
@@ -64,7 +67,7 @@ class StartupStatus:
             self.state.update(phase=phase, message=message,
                               progress=max(self.state["progress"], min(1, progress)),
                               completed=completed, total=total)
-            if phase in ("ready", "error"):
+            if phase in ("ready", "empty", "error"):
                 self.state["status"] = phase
                 self.finished = monotonic()
         if log:
@@ -81,6 +84,14 @@ class StartupStatus:
 
 class Dashboard(BaseHTTPRequestHandler):
     """API locale et distribution des fichiers web explicitement autorisés."""
+    @property
+    def runtime_context(self):
+        return self.server
+
+    @property
+    def reference_directory(self):
+        return getattr(self.runtime_context, "reference_directory", REFERENCES)
+
     def log_request(self, code="-", size="-"):
         if self.path != "/api/startup":
             super().log_request(code, size)
@@ -98,7 +109,7 @@ class Dashboard(BaseHTTPRequestHandler):
 
     def ready(self):
         """Répondre 503 tant que les modèles complets ne sont pas publiés."""
-        startup = getattr(self.server, "startup", None)
+        startup = getattr(self.runtime_context, "startup", None)
         if startup is None or startup.snapshot()["status"] == "ready":
             return True
         self.send_json(dict(error="Initialisation en cours ou interrompue.", startup=startup.snapshot()), 503)
@@ -113,7 +124,7 @@ class Dashboard(BaseHTTPRequestHandler):
         return True
 
     def send_prediction(self,payload,body,options):
-        store=getattr(self.server,"store",None)
+        store=getattr(self.runtime_context,"store",None)
         if store and options.get("retainSource"):
             key=digest(body);directory=store.path.parent/"parcours-importes";directory.mkdir(exist_ok=True)
             path=directory/(key+".gpx")
@@ -123,58 +134,67 @@ class Dashboard(BaseHTTPRequestHandler):
         self.send_json(payload)
 
     def backups(self):
-        store=getattr(self.server,"store",None)
+        store=getattr(self.runtime_context,"store",None)
         if store is None:raise ValueError("Stockage en cours d’initialisation.")
-        return Backups(store,REFERENCES)
+        return Backups(store,self.reference_directory)
 
     def do_GET(self):
         if not self.local_host():
             return
         parsed=urlsplit(self.path)
         if parsed.path=="/api/backup/list":
-            try:self.send_json(dict(backups=self.backups().list_backups(),automatic=getattr(self.server,"backup_state",None)))
+            try:self.send_json(dict(backups=self.backups().list_backups(),automatic=getattr(self.runtime_context,"backup_state",None)))
             except ValueError as error:self.send_json(dict(error=str(error)),503)
         elif parsed.path=="/api/state":
-            store=getattr(self.server,"store",None)
+            store=getattr(self.runtime_context,"store",None)
             self.send_json(dict(state=store.get_app_state()) if store else dict(error="Stockage en cours d’initialisation."),200 if store else 503)
         elif parsed.path=="/api/backup/download":
             try:
-                token=parse_qs(parsed.query).get("token",[""])[0];path=self.backups().path(token)
-                self.send_response(200);self.send_header("Content-Type","application/zip")
-                self.send_header("Content-Length",str(path.stat().st_size));self.send_header("Content-Disposition",'attachment; filename="PredicTrail-'+token+'.zip"');self.end_headers()
-                with path.open("rb") as source:shutil.copyfileobj(source,self.wfile,1024**2)
-            except (ValueError,OSError) as error:self.send_json(dict(error=str(error)),400)
+                token = parse_qs(parsed.query).get("token", [""])[0]
+                path = self.backups().path(token)
+                source = path.open("rb")
+            except (ValueError, OSError):
+                self.send_json(dict(error="Sauvegarde introuvable."), 404)
+                return
+            with source:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Length", str(os.fstat(source.fileno()).st_size))
+                self.send_header("Content-Disposition", f'attachment; filename="PredicTrail-{token}.zip"')
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                shutil.copyfileobj(source, self.wfile, 1024**2)
         elif parsed.path=="/api/source":
             key=parse_qs(parsed.query).get("id",[""])[0]
             if len(key)!=64 or any(c not in "0123456789abcdef" for c in key):self.send_json(dict(error="Parcours inconnu."),400);return
-            try:self.reply((self.server.store.path.parent/"parcours-importes"/(key+".gpx")).read_bytes(),"application/gpx+xml")
+            try:self.reply((self.runtime_context.store.path.parent/"parcours-importes"/(key+".gpx")).read_bytes(),"application/gpx+xml")
             except OSError:self.send_json(dict(error="Parcours source indisponible."),404)
         elif self.path == "/":
             self.reply(PAGE.read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/api/references":
             if self.ready():
-                self.send_json(self.server.references)
+                self.send_json(self.runtime_context.references)
         elif self.path == "/api/reference-map":
-            store = getattr(self.server, "store", None)
+            store = getattr(self.runtime_context, "store", None)
             if store is None:
                 self.send_json(dict(error="Stockage en cours d’initialisation. Réessayez dans quelques instants."), 503)
             else:
-                self.send_json(reference_map(store, REFERENCES))
+                self.send_json(reference_map(store, self.reference_directory))
         elif self.path == "/api/reference-selection":
-            store = getattr(self.server, "store", None)
-            self.send_json(dict(references=store.reference_inventory(REFERENCES) if store else []))
+            store = getattr(self.runtime_context, "store", None)
+            self.send_json(dict(references=store.reference_inventory(self.reference_directory) if store else []))
         elif self.path == "/api/runtime":
             self.send_json(dict(python=platform.python_version(), version=__version__))
         elif self.path == "/api/startup":
-            startup = getattr(self.server, "startup", None)
+            startup = getattr(self.runtime_context, "startup", None)
             self.send_json(startup.snapshot() if startup else dict(status="ready", progress=1, elapsed=0))
         elif self.path == "/api/local":
-            store = getattr(self.server, "store", None)
+            store = getattr(self.runtime_context, "store", None)
             self.send_json(dict(activities=store.list_activities() if store else []))
         elif self.path == "/api/garmin/status":
-            self.send_json(self.server.garmin.status())
+            self.send_json(self.runtime_context.garmin.status())
         elif self.path == "/api/operation":
-            operation = getattr(self.server, "operation", None)
+            operation = getattr(self.runtime_context, "operation", None)
             self.send_json(operation.snapshot() if operation else dict(status="ready", message="Aucune opération"))
         elif self.path in STATIC_FILES:
             try:
@@ -189,7 +209,9 @@ class Dashboard(BaseHTTPRequestHandler):
 
     def read_json(self):
         size = int(self.headers.get("Content-Length", "0"))
-        limit = MAX_SOURCE if urlsplit(self.path).path == "/api/gpx/convert" else (MAX_UPLOAD*2 if urlsplit(self.path).path in ("/api/state","/api/backup/create") else MAX_UPLOAD)
+        path = urlsplit(self.path).path
+        limit = {"/api/gpx/convert": MAX_SOURCE, "/api/local/upload": MAX_REFERENCE_BATCH,
+                 "/api/state": MAX_UPLOAD*2, "/api/backup/create": MAX_UPLOAD*2}.get(path, MAX_UPLOAD)
         if self.headers.get_content_type() != "application/json" or not 0 < size <= limit * 2:
             raise ValueError("Requête JSON absente, incorrecte ou trop volumineuse.")
         value = json.loads(self.rfile.read(size))
@@ -204,7 +226,8 @@ class Dashboard(BaseHTTPRequestHandler):
         try:
             # Les actions locales n'acceptent pas une origine web tierce.
             origin = self.headers.get("Origin")
-            if origin and origin != "http://" + self.headers.get("Host", ""):
+            expected_origin = getattr(self.server, "origin", "http://" + self.headers.get("Host", ""))
+            if origin and origin != expected_origin:
                 raise ValueError("Origine de requête non autorisée.")
             if url.path=="/api/backup/inspect":
                 size=int(self.headers.get("Content-Length","0"))
@@ -259,8 +282,8 @@ class Dashboard(BaseHTTPRequestHandler):
                 self.send_prediction(recorded_run(course, interval * 1000),body,options)
                 return
             course = read_gpx(BytesIO(body))
-            bank, references = getattr(self.server, "runtime",
-                (getattr(self.server, "model", None), getattr(self.server, "references", None)))
+            bank, references = getattr(self.runtime_context, "runtime",
+                (getattr(self.runtime_context, "model", None), getattr(self.runtime_context, "references", None)))
             if mode == "model":
                 model = choose_model(bank, course, choice)
             else:
@@ -289,26 +312,33 @@ class Dashboard(BaseHTTPRequestHandler):
 
     def manage(self, path, options):
         if path=="/api/state":
-            if not self.server.update_lock.acquire(blocking=False):raise ValueError("Une mise à jour est en cours. Réessayez après sa fin.")
-            try:self.server.store.save_app_state(options.get("state"));self.send_json(dict(saved=True))
-            finally:self.server.update_lock.release()
+            if not self.runtime_context.update_lock.acquire(blocking=False):raise ValueError("Une mise à jour est en cours. Réessayez après sa fin.")
+            try:self.runtime_context.store.save_app_state(options.get("state"));self.send_json(dict(saved=True))
+            finally:self.runtime_context.update_lock.release()
         elif path=="/api/backup/create":
-            if not self.server.update_lock.acquire(blocking=False):raise ValueError("Une mise à jour est en cours. Réessayez après sa fin.")
+            if not self.runtime_context.update_lock.acquire(blocking=False):raise ValueError("Une mise à jour est en cours. Réessayez après sa fin.")
             try:
-                self.server.store.save_app_state(options.get("state"))
+                self.runtime_context.store.save_app_state(options.get("state"))
                 report=self.backups().create();report["url"]="/api/backup/download?token="+report["token"]
                 self.send_json(report)
-            finally:self.server.update_lock.release()
+            finally:self.runtime_context.update_lock.release()
         elif path=="/api/backup/restore":
             token=options.get("token");manager=self.backups();manager.path(token)
             def restore(progress):
                 report=manager.restore(token)
                 progress("restauration","Données restaurées · reconstruction des modèles",1)
                 return report
-            start_update(self.server,restore,kind="restore")
+            start_update(self.runtime_context,restore,kind="restore")
             self.send_json(dict(accepted=True),202)
-        elif path == "/api/gpx/convert":
-            body = base64.b64decode(options.get("gpx", ""), validate=True)
+        elif path in ("/api/gpx/convert", "/api/reference-gpx"):
+            if path == "/api/reference-gpx":
+                store = getattr(self.runtime_context, "store", None)
+                if store is None:
+                    self.send_json(dict(error="Stockage en cours d’initialisation."), 503)
+                    return
+                body = store.read_reference_gpx(options.get("key"), self.reference_directory, MAX_SOURCE)
+            else:
+                body = base64.b64decode(options.get("gpx", ""), validate=True)
             converted, report = convert_gpx(body, options.get("mode", "compact"))
             response = dict(gpx=base64.b64encode(converted).decode("ascii"), report=report)
             if options.get("preview"):
@@ -321,37 +351,53 @@ class Dashboard(BaseHTTPRequestHandler):
                 response["preview"] = preview
             self.send_json(response)
         elif path == "/api/garmin/connect":
-            self.send_json(self.server.garmin.connect(options.get("email"), options.get("password")))
+            self.send_json(self.runtime_context.garmin.connect(options.get("email"), options.get("password")))
         elif path == "/api/garmin/mfa":
-            self.send_json(self.server.garmin.complete_mfa(options.get("code", "")))
+            self.send_json(self.runtime_context.garmin.complete_mfa(options.get("code", "")))
         elif path == "/api/garmin/disconnect":
-            self.send_json(self.server.garmin.disconnect())
+            self.send_json(self.runtime_context.garmin.disconnect())
         elif path == "/api/references/refresh":
-            start_update(self.server)
+            start_update(self.runtime_context)
             self.send_json(dict(accepted=True), 202)
         elif path == "/api/reference-selection":
             key, enabled = str(options.get("key", "")), options.get("enabled")
             if not isinstance(enabled, bool):
                 raise ValueError("Sélection incorrecte.")
             def select(progress):
-                self.server.store.select_reference(key, enabled, REFERENCES)
+                self.runtime_context.store.select_reference(key, enabled, self.reference_directory)
                 return dict(updated=True)
-            start_update(self.server, select)
+            start_update(self.runtime_context, select)
             self.send_json(dict(accepted=True), 202)
         elif path == "/api/local/upload":
-            body = base64.b64decode(options.get("gpx", ""), validate=True)
-            if not body or len(body) > MAX_UPLOAD:
-                raise ValueError("Fichier GPX absent ou trop volumineux.")
-            course = read_gpx(BytesIO(body), timed=True)
-            if elapsed(course) <= 0:
-                raise ValueError("La référence doit être chronométrée.")
-            name = str(options.get("name") or "Course importée")[:200]
-            activity = dict(id="local-" + digest(body), source="gpx", name=name, kind="running",
-                date=datetime.fromtimestamp(course[0][1][0][3]).date().isoformat(),
-                distance=describe_course(course)["distance"], reference=True)
+            files = options.get("files", [options])
+            if not isinstance(files, list) or not 1 <= len(files) <= MAX_REFERENCE_FILES:
+                raise ValueError("Sélectionnez entre 1 et 20 GPX.")
+            if any(not isinstance(file, dict) or not isinstance(file.get("gpx"), str) for file in files):
+                raise ValueError("Lot de GPX incorrect.")
+            if sum(len(file["gpx"]) for file in files) > MAX_REFERENCE_BATCH * 4 // 3:
+                raise ValueError("Le lot de références est limité à 60 Mio après conversion.")
             def upload(progress):
-                return dict(imported=int(self.server.store.save_activity(activity, body, describe_course(course))))
-            start_update(self.server, upload)
+                report = dict(imported=0, existing=0, errors=[])
+                for index, file in enumerate(files):
+                    name = str(file.get("name") or "Course importée")[:200]
+                    progress("import", name, index / len(files), index, len(files))
+                    try:
+                        body = base64.b64decode(file["gpx"], validate=True)
+                        if not body or len(body) > MAX_UPLOAD:
+                            raise ValueError("Fichier GPX absent ou trop volumineux.")
+                        course = read_gpx(BytesIO(body), timed=True)
+                        if elapsed(course) <= 0:
+                            raise ValueError("La référence doit être chronométrée.")
+                        descriptor = describe_course(course)
+                        activity = dict(id="local-" + digest(body), source="gpx", name=name, kind="running",
+                            date=datetime.fromtimestamp(course[0][1][0][3]).date().isoformat(),
+                            distance=descriptor["distance"], reference=True)
+                        saved = self.runtime_context.store.save_activity(activity, body, descriptor)
+                        report["imported" if saved else "existing"] += 1
+                    except (ValueError, KeyError, TypeError, ParseError, OverflowError, binascii.Error, OSError, sqlite3.Error) as error:
+                        report["errors"].append(name + " · " + str(error))
+                return report
+            start_update(self.runtime_context, upload)
             self.send_json(dict(accepted=True), 202)
         elif path == "/api/local/reference":
             activity_id = str(options.get("id", ""))
@@ -359,20 +405,20 @@ class Dashboard(BaseHTTPRequestHandler):
             if not isinstance(value, bool):
                 raise ValueError("Choisissez si cette activité sert de référence.")
             def reference(progress):
-                self.server.store.set_reference(activity_id, value)
+                self.runtime_context.store.set_reference(activity_id, value)
                 return dict(updated=True)
-            start_update(self.server, reference)
+            start_update(self.runtime_context, reference)
             self.send_json(dict(accepted=True), 202)
         elif path == "/api/local/delete":
             if options.get("scope") not in ("all", "matching"):
                 raise ValueError("Précisez la suppression de tous les imports ou des résultats filtrés.")
             filters = validate_filters(options.get("filters", {})) if options["scope"] == "matching" else None
             def remove(progress):
-                return dict(deleted=self.server.store.delete_activities(filters))
-            start_update(self.server, remove)
+                return dict(deleted=self.runtime_context.store.delete_activities(filters))
+            start_update(self.runtime_context, remove)
             self.send_json(dict(accepted=True), 202)
         elif path == "/api/garmin/stop":
-            operation = getattr(self.server, "operation", None)
+            operation = getattr(self.runtime_context, "operation", None)
             if operation and operation.snapshot().get("kind") == "garmin" and operation.snapshot()["status"] == "loading":
                 operation.cancel_event.set()
                 self.send_json(dict(stopping=True, message="Arrêt demandé. La requête réseau en cours doit se terminer ; les imports déjà enregistrés sont conservés."))
@@ -384,8 +430,8 @@ class Dashboard(BaseHTTPRequestHandler):
             if not isinstance(use_running, bool):
                 raise ValueError("Option de référence incorrecte.")
             def download(progress):
-                return self.server.garmin.import_activities(self.server.store, filters, use_running, progress, self.server.operation.cancel_event)
-            start_update(self.server, download, kind="garmin")
+                return self.runtime_context.garmin.import_activities(self.runtime_context.store, filters, use_running, progress, self.runtime_context.operation.cancel_event)
+            start_update(self.runtime_context, download, kind="garmin")
             self.send_json(dict(accepted=True), 202)
         else:
             self.send_json(dict(error="Action inconnue."), 404)
@@ -397,11 +443,17 @@ def initialize(server, operation=None):
         server.startup.update(phase, message, value, completed, total)
         if operation:
             operation.update(phase, message, 0.5 + value * 0.5, completed, total, log=False)
+    directory = getattr(server, "reference_directory", REFERENCES)
     try:
         if hasattr(server, "store"):
             if server.store is None:
                 server.store = Store()
-            sources = server.store.reference_sources(REFERENCES)
+            sources = server.store.reference_sources(directory)
+            if getattr(server, "hosted", False) and not sources:
+                server.references = server.model = None
+                server.runtime = (None, None)
+                progress("empty", "Ajoutez une référence GPX chronométrée pour entraîner votre modèle.", 1)
+                return
             fingerprint = server.store.manifest(sources)
             restored = server.store.load_models(fingerprint)
             if restored:
@@ -409,7 +461,7 @@ def initialize(server, operation=None):
                 cache = dict(restored=True, reused=len(sources), total=len(sources))
                 progress("cache", "Références et modèles restaurés depuis le stockage local", 0.95)
             else:
-                names, courses, pauses, skipped, cache = read_references(progress, server.store)
+                names, courses, pauses, skipped, cache = read_references(progress, server.store, directory=directory)
                 fingerprint = cache["fingerprint"]
                 restored = server.store.load_models(fingerprint)
                 if restored:
@@ -420,7 +472,7 @@ def initialize(server, operation=None):
                     model, references = (supervised_build(arguments, progress)
                         if getattr(server, "validation_isolated", False) else build_models(*arguments, progress))
                     cache["restored"] = False
-                if fingerprint and server.store.manifest(server.store.reference_sources(REFERENCES)) != fingerprint:
+                if fingerprint and server.store.manifest(server.store.reference_sources(directory)) != fingerprint:
                     raise ValueError("Références modifiées pendant le calcul. Relancez l'actualisation.")
                 if fingerprint and not restored:
                     server.store.save_models(fingerprint, (model, references))
@@ -438,7 +490,7 @@ def initialize(server, operation=None):
         if getattr(server,"backup_auto_enabled",False):
             def automatic_backup():
                 with server.update_lock:
-                    manager=Backups(server.store,REFERENCES)
+                    manager=Backups(server.store,directory)
                     marker=manager.directory/("automatique-"+datetime.now().strftime("%Y%m%d")+".json")
                     if marker.exists():return
                     try:
@@ -458,6 +510,10 @@ def start_update(server, work=None, kind="update"):
     """Sérialiser imports, suppressions et publication d'un nouvel instantané."""
     if not server.update_lock.acquire(blocking=False):
         raise ValueError("Une importation ou une mise à jour est déjà en cours.")
+    slots = getattr(server, "compute_slots", None)
+    if slots is not None and not slots.acquire(blocking=False):
+        server.update_lock.release()
+        raise ValueError("Le serveur traite déjà deux mises à jour. Réessayez dans quelques instants.")
     operation = StartupStatus()
     operation.cancel_event = Event()
     operation.state["kind"] = kind
@@ -477,6 +533,14 @@ def start_update(server, work=None, kind="update"):
             # Recalculer aussi après un import partiel interrompu.
             server.startup = StartupStatus()
             initialize(server, operation)
+            report_model_counts = getattr(server, "report_model_counts", None)
+            if report_model_counts is not None:
+                status = server.startup.snapshot()["status"]
+                references = server.references if status == "ready" else None
+                try:
+                    report_model_counts(references, empty=status == "empty")
+                except sqlite3.Error as error:
+                    print(f"Statistiques du modèle indisponibles : {error}", flush=True)
             with operation.lock:
                 operation.state["result"] = report
             if failure or server.startup.snapshot()["status"] == "error":
@@ -484,8 +548,16 @@ def start_update(server, work=None, kind="update"):
             else:
                 operation.update("ready", "Mise à jour terminée", 1)
         finally:
+            if slots is not None:
+                slots.release()
             server.update_lock.release()
-    Thread(target=run, daemon=True).start()
+    try:
+        Thread(target=run, daemon=True).start()
+    except RuntimeError:
+        if slots is not None:
+            slots.release()
+        server.update_lock.release()
+        raise
 
 
 def main():

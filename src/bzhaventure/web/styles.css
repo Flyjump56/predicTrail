@@ -136,6 +136,7 @@ section {
     opacity: .55;
     cursor: wait;
 }
+a.button { display:inline-block; color:#fff; text-decoration:none; }
 .metrics {
     display: grid;
     grid-template-columns: repeat(auto-fit,minmax(120px,1fr));
@@ -528,6 +529,9 @@ body.print-preparing #map {
   flex:1; height:auto; min-height:0; margin:8px 0 0;
 }
 #reference-map-panel > :not(#reference-map) { flex-shrink:0; }
+#reference-map-panel:fullscreen #reference-course-details,
+#reference-map-panel.expanded #reference-course-details { max-height:35vh; overflow:auto; }
+#reference-course-analysis details { margin:8px 0; }
 body.reference-map-fullscreen { overflow:hidden; }
 /* Conversion, comparaison et présentation guidée. */
 .course-view { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; align-items:center; }
@@ -541,6 +545,12 @@ body.reference-map-fullscreen { overflow:hidden; }
 #simulation-runs td:nth-child(3),#simulation-runs td:nth-child(4),#simulation-runs td:nth-child(5),#simulation-runs td:nth-child(6) { white-space:nowrap; }
 #simulation-runs td:first-child { overflow-wrap:anywhere; max-width:260px; }
 #simulation-runs td:last-child button { padding:8px; min-width:65px; margin:2px 0; }
+.simulation-passages th[scope="col"], .simulation-passages small {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.simulation-passages td { min-width: 170px; }
+.simulation-passages small { display: block; color: var(--muted); }
 .simulation-controls { position:sticky; top:0; z-index:900; background:#fff; padding:12px; border:1px solid var(--line); border-radius:12px; }
 #simulation-chart { display:none; }
 .tour-overlay { position:fixed; inset:0; background:rgba(12,35,31,.6); z-index:15000; display:grid; place-items:center; padding:24px; }
@@ -559,6 +569,21 @@ input[type="range"],input[type="checkbox"],progress { accent-color:#21677d; }
 #analysis-strategy-fields:disabled { opacity:.65; }
 .reference-course-info { max-height:210px; overflow:auto; margin:10px 0; }
 .reference-course-info .metric strong { font-size:1rem; }
+.account-page { max-width:600px; margin:48px auto; padding:0 16px; }
+.account-page-wide { max-width:1400px; }
+.account-table td:last-child { min-width:220px; white-space:normal; }
+.account-table .account-form { margin:12px 0; }
+.account-model-counts { white-space:normal; }
+.account-model-counts th,.account-model-counts td { padding:5px 8px; }
+.account-model-counts td:last-child { min-width:0; }
+.account-operation { min-width:180px; max-width:380px; white-space:normal; }
+.account-operation progress { width:100%; }
+.account-operation span { display:block; font-size:.875rem; }
+.account-form { display:grid; gap:16px; }
+.account-form label { display:grid; gap:6px; }
+.account-form .button { justify-self:start; }
+.account-bar { display:flex; align-items:center; flex-wrap:wrap; gap:14px; padding:8px 20px; }
+.account-bar form { margin-left:auto; }
 #reference-map-list tr { cursor:pointer; }
 #reference-map-list tr:hover,#reference-map-list tr:focus { background:#e8f0f6; }
 #reference-course-select { width:100%; max-width:650px; margin:6px 0; }

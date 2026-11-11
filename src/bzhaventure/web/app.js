@@ -5,6 +5,9 @@
  */
 // Accès au document et formatage des unités de l'interface.
 const $ = id => document.getElementById(id);
+const hostedAccount = document.body?.dataset?.account || '';
+const apiUrl = path => hostedAccount ? '/compte/'+hostedAccount+path : path;
+const apiFetch = (path,options) => fetch(apiUrl(path),options);
 const PROFILE_ICONS={flat:'▱',mountain:'▲',sawtooth:'⋀⋀',mixed:'∿'};
 const profileLabel = c => (PROFILE_ICONS[c.profile] || '◇')+' '+(c.profileLabel || c.profile || 'Inconnu').replace(/Dent de scie/g,'Dents de scie');
 const RELIEF_PROFILES=['flat','mountain','sawtooth','mixed'];
@@ -113,20 +116,20 @@ function profile(container, title, data) {
   if (container.id === 'result-profile') svg.append(guide,dot);
   return {guide,dot,project};
 }
-function showTerrain(container, data, timed=false) {
+function showTerrain(container, data, timed=false, estimated=true) {
   const table = element('table','');
   table.createCaption().textContent = 'Distance, temps et allure par type de terrain';
   const header = table.createTHead().insertRow();
   const labels = ['Terrain','Distance','Part du parcours'];
   if (timed) labels.push('Temps GPX','Allure GPX');
-  labels.push('Temps estimé','Allure estimée');
+  if (estimated) labels.push('Temps estimé','Allure estimée');
   for (const label of labels) {
     const cell = element('th',label);
     cell.scope = 'col';
     header.append(cell);
   }
   const body = table.createTBody();
-  for (const {name,distance,actual,estimated} of data.terrain) {
+  for (const {name,distance,actual,estimated:predicted} of data.terrain) {
     const row = body.insertRow();
     const label = element('th',name);
     label.scope = 'row';
@@ -135,7 +138,7 @@ function showTerrain(container, data, timed=false) {
     const timing = seconds => seconds === null || !distance ? ['—','—'] :
       [time(seconds),time(seconds * 1000 / distance).replace(/^00:/,'')+' / km'];
     if (timed) values.push(...timing(actual));
-    values.push(...timing(estimated));
+    if (estimated) values.push(...timing(predicted));
     for (const value of values) row.insertCell().textContent = value;
   }
   const note = element('p','Montée au-dessus de +3 %, descente sous −3 %, plat entre les deux. Les pentes sont calculées sur les portions de l’échantillonnage adapté au profil.');
@@ -144,6 +147,44 @@ function showTerrain(container, data, timed=false) {
   if (timed && data.unassigned >= 1) {
     container.append(element('small','Temps GPX hors portions classées · '+time(data.unassigned)));
   }
+}
+function referenceAnalysisDetails(course, showEstimates) {
+  const profileDetails = element('details','');
+  profileDetails.open = showEstimates;
+  const figure = element('figure','');
+  profileDetails.append(element('summary','Profil et dénivelé'),figure);
+
+  const terrainDetails = element('details','');
+  terrainDetails.open = showEstimates;
+  const terrain = element('div','');
+  terrain.className = 'scroll';
+  terrainDetails.append(element('summary','Montée, plat et descente'),terrain);
+
+  const pauseDetails = element('details','');
+  const pauseMetrics = element('div','');
+  pauseMetrics.className = 'metrics';
+  if (course.pauses) {
+    metrics(pauseMetrics,[
+      ['Temps de pause estimé',time(course.pauses.duration)],
+      ['Pauses détectées',course.pauses.count],
+      ['Interruptions d’enregistrement',time(course.pauses.unobserved)]
+    ]);
+  } else {
+    pauseMetrics.append(element('p','Données de pause indisponibles.'));
+  }
+  const pauseNote = element('p','Pauses estimées sur les points GPX d’origine : vitesse inférieure ou égale à 0,5 km/h pendant au moins une minute. Les intervalles de plus de cinq minutes et les coupures entre segments sont comptés comme interruptions d’enregistrement.');
+  pauseNote.className = 'muted notice';
+  pauseDetails.append(element('summary','Pauses et enregistrement GPX'),pauseMetrics,pauseNote);
+
+  return {
+    sections:[profileDetails,terrainDetails,pauseDetails],
+    render() {
+      if (course.profile?.length) profile(figure,course.name+' · Profil altimétrique',course);
+      else figure.append(element('p','Profil altimétrique indisponible.'));
+      if (course.terrain?.length) showTerrain(terrain,course,true,showEstimates);
+      else terrain.append(element('p','Répartition par terrain indisponible.'));
+    }
+  };
 }
 function svgElement(tag, attributes={}) {
   const node = document.createElementNS('http://www.w3.org/2000/svg',tag);
@@ -225,14 +266,8 @@ function showSegmentation(container, classification) {
 }
 // Catalogue affiché et sélection explicite du modèle d'analyse.
 let availableModels;
-function showModelCatalog(data) {
+function updatePersonalModelChoices(data) {
   const previousPrediction = $('prediction-model').value;
-  availableModels = [data.model,...data.models,data.inclinationModel];
-  $('model-groups').replaceChildren();
-  $('model-select').replaceChildren();
-  const globalOption = element('option','Toutes les références · modèle global');
-  globalOption.value = 'global';
-  $('model-select').append(globalOption);
   $('prediction-model').replaceChildren();
   for (const [value,label] of [['auto','Sélection automatique selon le parcours'],
     ['global','Modèle global · toutes les références'],
@@ -241,14 +276,38 @@ function showModelCatalog(data) {
     option.value = value;
     $('prediction-model').append(option);
   }
-  data.models.forEach((model,index) => {
-    const option = element('option',profileLabel(model)+' · '+model.distanceLabel+' · '+model.exactCount+' référence(s)');
-    option.value = String(index+1);
-    $('model-select').append(option);
+  for (const model of data.models) {
     const predictionOption = element('option',profileLabel(model)+' · '+model.distanceLabel+
       ' · '+model.exactCount+' référence(s) du groupe');
     predictionOption.value = model.profile+':'+model.distanceClass;
     $('prediction-model').append(predictionOption);
+  }
+  if (Array.from($('prediction-model').options).some(option => option.value === previousPrediction)) {
+    $('prediction-model').value = previousPrediction;
+  }
+
+  const previousSimulationModel=$('simulation-model').value;
+  $('simulation-model').replaceChildren();
+  for (const source of $('prediction-model').options) {
+    const option=element('option',source.textContent); option.value=source.value;
+    $('simulation-model').append(option);
+  }
+  if (Array.from($('simulation-model').options).some(o=>o.value===previousSimulationModel)) {
+    $('simulation-model').value=previousSimulationModel;
+  }
+  if(typeof restoreDeferredChoices==='function')restoreDeferredChoices();
+}
+function showModelCatalog(data) {
+  availableModels = [data.model,...data.models,data.inclinationModel];
+  $('model-groups').replaceChildren();
+  $('model-select').replaceChildren();
+  const globalOption = element('option','Toutes les références · modèle global');
+  globalOption.value = 'global';
+  $('model-select').append(globalOption);
+  data.models.forEach((model,index) => {
+    const option = element('option',profileLabel(model)+' · '+model.distanceLabel+' · '+model.exactCount+' référence(s)');
+    option.value = String(index+1);
+    $('model-select').append(option);
     const row = $('model-groups').insertRow();
     const button = element('button',profileLabel(model));
     button.type = 'button';
@@ -262,9 +321,6 @@ function showModelCatalog(data) {
       row.insertCell().textContent = value;
     }
   });
-  if (Array.from($('prediction-model').options).some(option => option.value === previousPrediction)) {
-    $('prediction-model').value = previousPrediction;
-  }
   const inclinationOption = element('option','Test · classes d’inclinaison en montée et descente');
   inclinationOption.value = 'inclination';
   $('model-select').append(inclinationOption);
@@ -328,11 +384,19 @@ function rankReferenceGroups(courses, sort) {
 
 let referenceCourses=[], referenceRows=[], referenceHeaders=[], histogramFilter=null;
 let histogramCourses=[], histogramBars=[];
-async function showReferences() {
+let referenceViewAccount = '', referenceListRequest = 0, referenceDataScope = '';
+function referenceViewPath(resource, account) {
+  return account ? '/api/admin/'+resource+'?account='+encodeURIComponent(account) : '/api/'+resource;
+}
+async function showReferences(personalOnly = false) {
+  const account = personalOnly === true ? '' : referenceViewAccount;
+  const version = personalOnly === true ? null : ++referenceListRequest;
   try {
-    const response = await fetch('/api/references');
-    if (!response.ok) throw Error('Chargement des références impossible.');
-    const data = await response.json();
+    const data = await requestJSON(referenceViewPath('references',account));
+    if (!account && (personalOnly === true || version === referenceListRequest)) updatePersonalModelChoices(data);
+    if (account !== referenceViewAccount || (version !== null && version !== referenceListRequest)) return true;
+    referenceDataScope = account;
+    $('reference-model-panel').hidden = currentScreen !== 'references';
     referenceCourses=data.courses; referenceRows=[]; referenceHeaders=[];
     const {groups,rank,closest,performance}=rankReferenceGroups(data.courses,$('reference-sort').value);
     $('cache-info').textContent = data.cache ?
@@ -375,30 +439,8 @@ async function showReferences() {
       branch.hidden = true;
       const cell = branch.insertCell();
       cell.colSpan = 8;
-      const profileDetails = element('details','');
-      profileDetails.open = true;
-      profileDetails.append(element('summary','Profil et dénivelé'));
-      const figure = element('figure','');
-      profileDetails.append(figure);
-      const terrainDetails = element('details','');
-      terrainDetails.open = true;
-      terrainDetails.append(element('summary','Montée, plat et descente'));
-      const terrain = element('div','');
-      terrain.className = 'scroll';
-      terrainDetails.append(terrain);
-      const pauseDetails = element('details','');
-      pauseDetails.append(element('summary','Pauses et enregistrement GPX'));
-      const pauseMetrics = element('div','');
-      pauseMetrics.className = 'metrics';
-      metrics(pauseMetrics,[
-        ['Temps de pause estimé',time(course.pauses.duration)],
-        ['Pauses détectées',course.pauses.count],
-        ['Interruptions d’enregistrement',time(course.pauses.unobserved)]
-      ]);
-      const pauseNote = element('p','Pauses estimées sur les points GPX d’origine : vitesse inférieure ou égale à 0,5 km/h pendant au moins une minute. Les intervalles de plus de cinq minutes et les coupures entre segments sont comptés comme interruptions d’enregistrement.');
-      pauseNote.className = 'muted notice';
-      pauseDetails.append(pauseMetrics,pauseNote);
-      cell.append(profileDetails,terrainDetails,pauseDetails);
+      const analysis = referenceAnalysisDetails(course,true);
+      cell.append(...analysis.sections);
       const classificationDetails = element('details','');
       classificationDetails.append(element('summary','Segmentation et échantillonnage'));
       const classification = element('div','');
@@ -418,8 +460,7 @@ async function showReferences() {
         button.setAttribute('aria-expanded',String(!branch.hidden));
         button.textContent = (branch.hidden ? '▸ ' : '▾ ')+'#'+position+' '+course.name+badge;
         if (!loaded) {
-          profile(figure,course.name+' · Profil altimétrique',course);
-          showTerrain(terrain,course,true);
+          analysis.render();
           loaded = true;
         }
       };
@@ -439,20 +480,12 @@ async function showReferences() {
     showModelCatalog(data);
     drawReferenceHistogram(data.courses);
     applyHistogramSelection();
-    const previousSimulationModel=$('simulation-model').value;
-    $('simulation-model').replaceChildren();
-    for (const source of $('prediction-model').options) {
-      const option=element('option',source.textContent); option.value=source.value;
-      $('simulation-model').append(option);
-    }
-    if (Array.from($('simulation-model').options).some(o=>o.value===previousSimulationModel)) {
-      $('simulation-model').value=previousSimulationModel;
-    }
-    if(typeof restoreDeferredChoices==='function')restoreDeferredChoices();
-    await refreshSelection();
+    if (!account) await refreshSelection();
     return true;
   } catch (error) {
-    $('reference-status').textContent = error.message;
+    if (account === referenceViewAccount && (version === null || version === referenceListRequest)) {
+      $('reference-status').textContent = error.message;
+    }
     return false;
   }
 }
@@ -819,8 +852,7 @@ function readGpxSource(file) {
   });
 }
 const gpxImportMetadata = new WeakMap();
-async function readGpx(file) {
-  const mode = $('gpx-conversion').value || 'compact';
+async function readGpx(file, mode = $('gpx-conversion').value || 'compact', showPreview = showConversionPreview) {
   const panel = $('gpx-import-reports');
   const row = document.createElement('p');
   row.textContent = file.name+' · contrôle et conversion en cours…';
@@ -834,18 +866,20 @@ async function readGpx(file) {
     const converted = await postJSON('/api/gpx/convert',{gpx:await readGpxSource(file),mode,preview:!$('screen-conversion').hidden});
     const r = converted.report;
     gpxImportMetadata.set(file,r);
-    if (converted.preview) showConversionPreview(converted.preview,file,r);
+    if (converted.preview) showPreview(converted.preview,file,r);
     const size = value => (value / (1024*1024)).toFixed(2)+' Mio';
     row.textContent = file.name+' · '+size(r.originalBytes)+' → '+size(r.convertedBytes)+
       ' · gain '+r.gainPercent+' % · '+r.pointCount+' points · '+
       (r.optimized ? 'Optimisé' : r.optimizable ? 'Optimisation disponible avec le traitement choisi' : 'Déjà compact pour ce traitement')+
       ' · '+(r.recordedCompatible ? 'Compatible avec les temps enregistrés' : 'Temps enregistrés indisponibles : '+r.recordedError)+
       (r.removedExtensions ? ' · extensions des capteurs retirées' : '');
-    const link = document.createElement('a');
-    link.textContent = ' Télécharger le GPX préparé';
-    link.href = URL.createObjectURL(new Blob([Uint8Array.from(atob(converted.gpx),c=>c.charCodeAt(0))],{type:'application/gpx+xml'}));
-    link.download = file.name.replace(/\.gpx$/i,'')+'-'+mode+'.gpx';
-    row.append(link);
+    if (Array.from(panel.children).includes(row)) {
+      const link = document.createElement('a');
+      link.textContent = ' Télécharger le GPX préparé';
+      link.href = URL.createObjectURL(new Blob([Uint8Array.from(atob(converted.gpx),c=>c.charCodeAt(0))],{type:'application/gpx+xml'}));
+      link.download = file.name.replace(/\.gpx$/i,'')+'-'+mode+'.gpx';
+      row.append(link);
+    }
     if (!r.importable) throw Error('Le résultat dépasse encore 20 Mio. Essayez le mode allégé pour le simulateur.');
     return converted.gpx;
   } catch (error) {
@@ -853,15 +887,42 @@ async function readGpx(file) {
     throw error;
   }
 }
+async function processGpxFiles(files, process, onProgress = () => {}) {
+  const results = [];
+  const active = new Map();
+  let next = 0, completed = 0;
+  async function worker() {
+    while (next < files.length) {
+      const index = next++, file = files[index];
+      active.set(index,file.name);
+      onProgress(completed,active.values());
+      try {
+        results[index] = {value:await process(file,index)};
+      } catch (error) {
+        results[index] = {error:file.name+' : '+error.message};
+      }
+      active.delete(index);
+      onProgress(++completed,active.values());
+    }
+  }
+  await Promise.all([worker(),worker()]);
+  return results;
+}
 $('convert-gpx-files').addEventListener('click',() => $('conversion-files').click());
 $('conversion-files').addEventListener('change',async() => {
   const files = Array.from($('conversion-files').files);
+  const mode = $('gpx-conversion').value || 'compact';
   $('conversion-files').value = '';
   $('convert-gpx-files').disabled = true;
+  let previewIndex = -1;
   try {
-    for (const file of files) {
-      try { await readGpx(file); } catch (_) { /* Le bilan individuel affiche l’erreur. */ }
-    }
+    await processGpxFiles(files,async (file,index) => {
+      await readGpx(file,mode,(data,source,report) => {
+        if (index < previewIndex) return;
+        previewIndex = index;
+        showConversionPreview(data,source,report);
+      });
+    });
   } finally { $('convert-gpx-files').disabled = false; }
 });
 function updatePredictionMode() {
@@ -965,7 +1026,7 @@ async function analyze(file) {
   try {
     options.gpx = await readGpx(file);
     if (version !== analysisVersion) return;
-    const response = await fetch('/api/prediction',{
+    const response = await apiFetch('/api/prediction',{
       method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(options)
     });
     const data = await response.json();
@@ -1028,7 +1089,7 @@ async function analyze(file) {
 // lorsque les données sont chargées ou qu'une erreur de démarrage est affichée.
 async function followStartup() {
   try {
-    const response = await fetch('/api/startup');
+    const response = await apiFetch('/api/startup');
     if (!response.ok) throw Error('Suivi du démarrage indisponible.');
     const startup = await response.json();
     $('startup-progress').value = Math.round(startup.progress*100);
@@ -1037,23 +1098,26 @@ async function followStartup() {
       (startup.total ? ' · '+startup.completed+' / '+startup.total : '');
     $('startup-watchdog').textContent = validationHealth(startup);
     $('retry-validation').hidden = startup.status !== 'error';
-    if (startup.status === 'error') {
+    if (startup.status === 'error' || startup.status === 'empty') {
       startupReady = false;
       updatePredictionMode();
-      $('startup-message').classList.add('error');
-      $('reference-status').textContent = startup.message+' · Réactivez ou importez une référence chronométrée pour reconstruire le modèle.';
-      $('reference-table').hidden = true;
-      $('reference-metrics').replaceChildren();
-      $('model-chart').replaceChildren();
-      $('model-groups').replaceChildren();
-      $('model-info').textContent = 'Modèle indisponible pour la sélection actuelle.';
+      $('startup-message').classList[startup.status === 'error' ? 'add' : 'remove']('error');
+      if (!referenceViewAccount) {
+        $('reference-status').textContent = startup.status === 'empty' ? startup.message :
+          startup.message+' · Réactivez ou importez une référence chronométrée pour reconstruire le modèle.';
+        $('reference-table').hidden = true;
+        $('reference-metrics').replaceChildren();
+        $('model-chart').replaceChildren();
+        $('model-groups').replaceChildren();
+        $('model-info').textContent = 'Modèle indisponible pour la sélection actuelle.';
+      }
       if ($('prediction-mode').value === 'model') {
         pausePlayback(); routeData = null; $('result').hidden = true;
       }
       return;
     }
     if (startup.status === 'ready') {
-      if (await showReferences()) {
+      if (await showReferences(true)) {
         startupReady = true;
         updatePredictionMode();
         $('prediction-model').disabled = false;
@@ -1076,7 +1140,7 @@ updatePredictionMode();
 let localActivities = [];
 let operationBusy = false;
 async function requestJSON(path, options={}) {
-  const response = await fetch(path,options);
+  const response = await apiFetch(path,options);
   const data = await response.json();
   if (!response.ok) throw Error(data.error || 'Action impossible.');
   return data;
@@ -1100,6 +1164,40 @@ function filteredActivities() {
     (!filters.minDate || activity.date >= filters.minDate) &&
     (!filters.maxDate || activity.date <= filters.maxDate));
 }
+function referenceGpxButton(key, name, statusId = 'reference-gpx-status') {
+  const button = element('button','Exporter le GPX');
+  button.className = 'button';
+  button.type = 'button';
+  button.setAttribute('aria-label','Exporter le GPX de '+name);
+  button.addEventListener('click',async () => {
+    const mode = $('reference-gpx-mode').value || 'original';
+    const status = $(statusId);
+    button.disabled = true;
+    status.textContent = 'Préparation du GPX de '+name+'…';
+    try {
+      const {gpx,report} = await postJSON('/api/reference-gpx',{key,mode});
+      const bytes = Uint8Array.from(atob(gpx),character => character.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes],{type:'application/gpx+xml'}));
+      const link = document.createElement('a');
+      const filename = name.replace(/\.gpx$/i,'').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_') || 'parcours';
+      link.href = url;
+      link.download = filename+(mode === 'original' ? '' : '-'+mode)+'.gpx';
+      try {
+        link.click();
+      } finally {
+        setTimeout(() => URL.revokeObjectURL(url),1000);
+      }
+      const reduction = report.optimized ? ' · taille réduite de '+report.gainPercent+' %' : '';
+      const limit = report.importable ? '' : ' · plus de 20 Mio pour un nouvel import';
+      status.textContent = 'GPX de '+name+' prêt'+reduction+limit+'.';
+    } catch (error) {
+      status.textContent = 'Export de '+name+' impossible · '+error.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return button;
+}
 function renderLocalActivities() {
   $('local-activities').replaceChildren();
   for (const activity of filteredActivities()) {
@@ -1119,6 +1217,7 @@ function renderLocalActivities() {
     reference.addEventListener('change',() => libraryAction('/api/local/reference',
       {id:activity.id,reference:reference.checked}));
     row.insertCell().append(reference);
+    row.insertCell().append(referenceGpxButton('activity:'+activity.id,activity.name,'library-status'));
   }
 }
 async function refreshLocal() {
@@ -1194,7 +1293,7 @@ async function watchOperation() {
   if (startup.status === 'ready') {
     startupReady = true;
     updatePredictionMode();
-    await showReferences();
+    await showReferences(true);
     if (selectedFile && $('prediction-mode').value === 'model') await analyze(selectedFile);
   } else {
     $('startup-panel').hidden = false;
@@ -1204,16 +1303,39 @@ async function watchOperation() {
 $('refresh-references').addEventListener('click',() => libraryAction('/api/references/refresh',{}));
 $('upload-reference').addEventListener('click',() => $('reference-file').click());
 $('reference-file').addEventListener('change',async () => {
-  const file = $('reference-file').files[0];
+  const files = Array.from($('reference-file').files);
   $('reference-file').value = '';
-  if (!file) return;
-  if (file.size > 100*1024*1024) {
-    $('library-status').textContent = 'Source de référence limitée à 100 Mio.';
+  if (!files.length || operationBusy) return;
+  if (files.length > 20) {
+    $('library-status').textContent = 'Sélectionnez au maximum 20 GPX par lot.';
     return;
   }
+  const mode = $('gpx-conversion').value || 'compact';
+  let encodedSize = 0;
+  libraryBusy(true);
   try {
-    await libraryAction('/api/local/upload',{name:file.name.replace(/\.gpx$/i,''),gpx:await readGpx(file)});
-  } catch (error) { $('library-status').textContent = error.message; }
+    const results = await processGpxFiles(files,async file => {
+      const gpx = await readGpx(file,mode);
+      if (encodedSize + gpx.length > 80*1024*1024) throw Error('Limite de 60 Mio par lot après conversion.');
+      encodedSize += gpx.length;
+      return {name:file.name.replace(/\.gpx$/i,''),gpx};
+    },(done,active) => {
+      $('library-status').textContent = 'Préparation GPX · '+done+' / '+files.length+' · '+[...active].join(', ');
+    });
+    const prepared = results.flatMap(result => result.value ? [result.value] : []);
+    const errors = results.flatMap(result => result.error ? [result.error] : []);
+    if (prepared.length) {
+      await postJSON('/api/local/upload',{files:prepared});
+      await watchOperation();
+    }
+    if (errors.length) $('library-status').textContent = [
+      prepared.length ? $('library-status').textContent : '', ...errors
+    ].filter(Boolean).join(' · ');
+  } catch (error) {
+    $('library-status').textContent = error.message;
+  } finally {
+    libraryBusy(false);
+  }
 });
 for (const id of ['import-kind','import-profile','import-distance-class','import-min-km','import-max-km','import-min-date','import-max-date']) {
   $(id).addEventListener('change',renderLocalActivities);
@@ -1257,6 +1379,7 @@ function showScreen(name) {
   if (name !== "analysis") pausePlayback();
   $('screen-analysis').hidden = name !== 'analysis';
   document.querySelectorAll('.screen-references').forEach(node => { node.hidden = name !== 'references'; });
+  updateReferenceViewControls();
   $('screen-simulations').hidden = name !== 'simulations';
   $('screen-map').hidden = name !== 'map';
   $('screen-conversion').hidden = name !== 'conversion';
@@ -1269,12 +1392,66 @@ function showScreen(name) {
   if (name === 'conversion' && conversionView) conversionView.resize();
   if (name === 'simulations') renderRuns();
   if (name === 'map') loadReferenceMap();
-  if (name === 'references' && !startupReady) loadReferenceMap();
+  if (name === 'references') {
+    if (referenceViewAccount || (startupReady && referenceDataScope !== '')) showReferences();
+    else if (!startupReady) loadReferenceMap();
+  }
 }
 for (const name of ['analysis','references','map','simulations','conversion','backups']) {
   $('tab-'+name).addEventListener('click',() => showScreen(name));
 }
 $('reference-sort').addEventListener('change',showReferences);
+function updateReferenceViewControls() {
+  const foreign = Boolean(referenceViewAccount);
+  $('reference-library-panel').hidden = currentScreen !== 'references' || foreign;
+  $('reference-selection-panel').hidden = foreign;
+  $('reference-export-controls').hidden = foreign;
+  $('reference-model-panel').hidden = currentScreen !== 'references' || referenceDataScope !== referenceViewAccount;
+}
+function changeReferenceView(account) {
+  referenceViewAccount = account;
+  referenceDataScope = null;
+  referenceListRequest++;
+  mapRequest++;
+  referenceCourses = []; referenceRows = []; referenceHeaders = [];
+  histogramFilter = null;
+  drawReferenceHistogram([]);
+  $('reference-table').hidden = true;
+  $('reference-metrics').replaceChildren();
+  $('cache-info').textContent = '';
+  $('reference-status').textContent = 'Chargement des références…';
+  referenceMapData = {courses:[],skipped:[]};
+  renderReferenceMap(null);
+  updateReferenceViewControls();
+  for (const screen of ['references','map']) {
+    const select = $('admin-reference-'+screen);
+    select.value = account;
+    const name = Array.from(select.options).find(option => option.value === account)?.textContent;
+    $('admin-reference-status-'+screen).textContent = account ? 'Consultation en lecture seule · '+name : '';
+    const progress = $('admin-reference-operation-'+screen);
+    progress.dataset.operationAccount = account;
+    progress.hidden = !account;
+    progress.querySelector('progress').hidden = true;
+    progress.querySelector('span').textContent = 'Chargement du suivi…';
+  }
+  if (currentScreen === 'map') loadReferenceMap();
+  else showReferences();
+}
+if (hostedAccount && $('admin-reference-references')) {
+  for (const screen of ['references','map']) {
+    const select = $('admin-reference-'+screen);
+    select.addEventListener('change',()=>changeReferenceView(select.value));
+    $('admin-reference-refresh-'+screen).addEventListener('click',()=>{
+      if (screen === 'map') loadReferenceMap();
+      else showReferences();
+    });
+  }
+  document.addEventListener('predictrail-operation-finished',event=>{
+    if (event.detail !== referenceViewAccount) return;
+    if (currentScreen === 'map') loadReferenceMap();
+    if (currentScreen === 'references') showReferences();
+  });
+}
 async function refreshSelection() {
   try {
     const data = await requestJSON('/api/reference-selection');
@@ -1289,6 +1466,7 @@ async function refreshSelection() {
       checkbox.addEventListener('change',() => libraryAction('/api/reference-selection',
         {key:source.key,enabled:checkbox.checked}));
       row.insertCell().append(checkbox);
+      row.insertCell().append(referenceGpxButton(source.key,source.name));
     }
   } catch (error) { $('reference-status').textContent = error.message; }
 }
@@ -1337,12 +1515,12 @@ function routeFingerprint(text) {
 }
 let activeRouteKey = '', runs = [];
 try {
-  const saved = JSON.parse(localStorage.getItem('bzhaventure-runs-v1') || '[]');
+  const saved = hostedAccount ? [] : JSON.parse(localStorage.getItem('bzhaventure-runs-v1') || '[]');
   if (Array.isArray(saved)) runs = saved.filter(r=>r.data?.marks?.length && Number.isFinite(r.data.duration)).slice(0,20);
 } catch (_) { /* Le navigateur peut refuser le stockage local. */ }
 // IndexedDB accepte les chronologies volumineuses que localStorage peut refuser.
 let runsRevision=0;
-const runDatabase = typeof indexedDB==='undefined' ? Promise.resolve(null) : new Promise(resolve=>{
+const runDatabase = hostedAccount || typeof indexedDB==='undefined' ? Promise.resolve(null) : new Promise(resolve=>{
   const request=indexedDB.open('bzhaventure-simulations',1);
   request.onupgradeneeded=()=>{request.result.createObjectStore('runs');};
   request.onsuccess=()=>resolve(request.result);request.onerror=()=>resolve(null);request.onblocked=()=>resolve(null);
@@ -1350,6 +1528,7 @@ const runDatabase = typeof indexedDB==='undefined' ? Promise.resolve(null) : new
 function persistRuns() {
   const revision=++runsRevision, serialized=JSON.stringify(runs);
   if(typeof scheduleStateSave==='function')scheduleStateSave();
+  if(hostedAccount)return true;
   if(typeof indexedDB==='undefined') {
     try {localStorage.setItem('bzhaventure-runs-v1',serialized);return true;}
     catch(_){$('simulation-status').textContent='Stockage navigateur indisponible ou plein : scénarios conservés pour cette session uniquement.';return false;}
@@ -1379,7 +1558,6 @@ $('save-run').addEventListener('click',() => {
 });
 function renderRuns() {
   $('simulation-runs').replaceChildren(); $('simulation-chart').replaceChildren();
-  const baseline = runs[0];
   for (const [index,run] of runs.entries()) {
     const row = $('simulation-runs').insertRow(), data = run.data;
     for (const value of [run.name+' · '+run.file,
@@ -1400,17 +1578,76 @@ function renderRuns() {
     const fill = element('div',''); fill.style.width=(100*data.duration/Math.max(...runs.map(r=>r.data.duration)))+'%';
     bar.append(label,fill); $('simulation-chart').append(bar);
   }
-  $('simulation-marks-head').replaceChildren(); $('simulation-marks').replaceChildren();
+  renderRunPassages();
   if (typeof renderRunVisuals === 'function') renderRunVisuals();
-  if (!baseline) return;
-  const same = runs.filter(r=>r.routeKey===baseline.routeKey);
-  const head = element('tr',''); head.append(element('th','Repère du premier run'));
-  same.forEach(r=>head.append(element('th',r.name))); $('simulation-marks-head').append(head);
-  for (const mark of baseline.data.marks) {
-    const row = $('simulation-marks').insertRow(); row.insertCell().textContent=mark[5]+' · '+km(mark[0]);
-    for (const run of same) {
-      const match = run.data.marks.find(m=>Math.abs(m[0]-mark[0])<0.001);
-      row.insertCell().textContent = match ? time(match[1])+(run.departure ? ' · '+passageDate(new Date(run.departure),match[1]) : '') : 'Repère absent';
+}
+
+function runPassages(data) {
+  // Les portions d’analyse ont la même grille que les totaux du récapitulatif.
+  // Les anciens runs peuvent ne disposer que du profil altimétrique.
+  const intervals = data.sections?.length ? data.sections :
+    (data.profile || []).flatMap(segment => segment.slice(1).map((point,index) => ({
+      distance:segment[index][0],endDistance:point[0],
+      start:[0,0,segment[index][1]],end:[0,0,point[1]]
+    })));
+  const passages = new Map();
+  let index = 0, ascent = 0, descent = 0;
+  for (const [i,mark] of data.marks.entries()) {
+    const position = mark[0];
+    while (index < intervals.length && intervals[index].endDistance <= position) {
+      const {start,end} = intervals[index++];
+      const change = end[2]-start[2];
+      ascent += Math.max(0,change);
+      descent += Math.max(0,-change);
+    }
+    const interval = intervals[index];
+    const partial = interval && position > interval.distance && interval.endDistance > interval.distance
+      ? (interval.end[2]-interval.start[2])*(position-interval.distance)/(interval.endDistance-interval.distance)
+      : 0;
+    const key = i === 0 ? 'start' : i === data.marks.length-1 ? 'finish' : Math.round(position*1000);
+    const hasRelief = intervals.length > 0 || key === 'start';
+    const passage = {
+      mark,
+      ascent:hasRelief ? ascent+Math.max(0,partial) : null,
+      descent:hasRelief ? descent+Math.max(0,-partial) : null
+    };
+    if (key === 'finish') {
+      if (Number.isFinite(data.ascent)) passage.ascent = data.ascent;
+      if (Number.isFinite(data.descent)) passage.descent = data.descent;
+    }
+    passages.set(key,passage);
+  }
+  return passages;
+}
+
+function renderRunPassages() {
+  const header = $('simulation-marks-head'), body = $('simulation-marks');
+  header.replaceChildren(); body.replaceChildren();
+  if (!runs.length) return;
+  const passages = runs.map(run => runPassages(run.data));
+  const distances = [...new Set(passages.flatMap(points => [...points.keys()].filter(Number.isFinite)))].sort((a,b)=>a-b);
+  const head = element('tr','');
+  for (const label of ['Repère',...runs.map(run => run.name === run.file ? run.name : run.name+' · '+run.file)]) {
+    const column = element('th',label); column.scope = 'col'; head.append(column);
+  }
+  header.append(head);
+  for (const key of ['start',...distances,'finish']) {
+    const row = body.insertRow();
+    const heading = element('th',key === 'start' ? 'Départ' : key === 'finish' ? 'Arrivée' : km(key/1000));
+    heading.scope = 'row'; row.append(heading);
+    for (const [index,points] of passages.entries()) {
+      const cell = row.insertCell(), passage = points.get(key);
+      if (!passage) {
+        cell.textContent = '—';
+        continue;
+      }
+      const {mark,ascent,descent} = passage;
+      cell.textContent = km(mark[0])+' · D+ '+(ascent === null ? '—' : meters(ascent))+' · D− '+(descent === null ? '—' : meters(descent));
+      const departure = runs[index].departure;
+      const timing = element('small',time(mark[1])+(departure ? ' · '+passageDate(new Date(departure),mark[1]) : ''));
+      cell.append(timing);
+      const custom = mark[5]?.indexOf('Repère personnalisé') ?? -1;
+      if (custom >= 0) cell.append(element('small',mark[5].slice(custom)));
     }
   }
 }
@@ -1450,22 +1687,24 @@ $('simulate-files').addEventListener('click',async()=>{
     if (mode!=='recorded' && $('simulation-departure').value && !departure) throw Error('Corrigez le départ des simulations.');
   } catch(error) { $('simulation-status').textContent=error.message; return; }
   $('simulate-files').disabled=true; $('select-simulation-gpx').disabled=true; $('save-run').disabled=true;
-  const files=[...simulationFiles], prefix=$('run-name').value.trim(), errors=[];
-  let completed=0;
+  const files=[...simulationFiles], prefix=$('run-name').value.trim();
+  const conversionMode=$('gpx-conversion').value || 'compact';
   try {
-    for (const file of files) {
-      $('simulation-status').textContent=(mode==='recorded' ? 'Lecture GPX ' : 'Simulation ')+(completed+errors.length+1)+' / '+files.length+' · '+file.name;
-      try {
-        const gpx=await readGpx(file);
-        const data=await postJSON('/api/prediction',{...options,gpx});
-        runs.push({name:(prefix ? prefix+' · ' : '')+file.name,file:file.name,sourceDate:gpxImportMetadata.get(file)?.recordedStart || null,
-          departure:mode==='recorded' ? data.recordedStart : departure ? departure.toISOString() : null,routeKey:routeFingerprint(gpx),data});
-        completed++;
-        persistRuns(); renderRuns();
-      } catch(error) { errors.push(file.name+' : '+error.message); }
+    const results = await processGpxFiles(files,async file => {
+      const gpx=await readGpx(file,conversionMode);
+      const data=await postJSON('/api/prediction',{...options,gpx});
+      return {name:(prefix ? prefix+' · ' : '')+file.name,file:file.name,sourceDate:gpxImportMetadata.get(file)?.recordedStart || null,
+        departure:mode==='recorded' ? data.recordedStart : departure ? departure.toISOString() : null,routeKey:routeFingerprint(gpx),data};
+    },(done,active) => {
+      $('simulation-status').textContent=(mode==='recorded' ? 'Lecture GPX · ' : 'Simulation · ')+done+' / '+files.length+' · '+[...active].join(', ');
+    });
+    const added = results.flatMap(result => result.value ? [result.value] : []);
+    const errors = results.flatMap(result => result.error ? [result.error] : []);
+    $('simulation-status').textContent=added.length+(mode==='recorded' ? ' course(s) enregistrée(s) ajoutée(s). ' : ' simulation(s) ajoutée(s). ')+errors.join(' · ');
+    if (added.length) {
+      runs.push(...added);
+      persistRuns(); renderRuns();
     }
-    $('simulation-status').textContent=completed+(mode==='recorded' ? ' course(s) enregistrée(s) ajoutée(s). ' : ' simulation(s) ajoutée(s). ')+errors.join(' · ');
-    if (completed) persistRuns();
   } finally {
     $('simulate-files').disabled=false; $('select-simulation-gpx').disabled=false; $('save-run').disabled=false;
   }
@@ -1574,9 +1813,10 @@ let referenceMap, referenceLayers, referenceMapData, mapRequest=0;
 const referenceColors=['#00796b','#b24b40','#4267ae','#9b4a98','#aa721c','#3b7b3e','#6845b0','#a34868'];
 async function loadReferenceMap() {
   const version=++mapRequest;
+  const account=referenceViewAccount;
   $('reference-map-status').textContent='Chargement des traces de référence…';
   try {
-    const data=await requestJSON('/api/reference-map');
+    const data=await requestJSON(referenceViewPath('reference-map',account));
     if (version!==mapRequest) return;
     referenceMapData=data;
     const seen=new Set();
@@ -1585,13 +1825,15 @@ async function loadReferenceMap() {
       if (!course.enabled || seen.has(id)) return false;
       seen.add(id); return true;
     });
-    drawReferenceHistogram(startupReady && referenceCourses.length ? referenceCourses : mappedCourses);
+    drawReferenceHistogram(referenceDataScope === account && referenceCourses.length ? referenceCourses : mappedCourses);
     renderReferenceMap();
   } catch(error) { if (version===mapRequest) $('reference-map-status').textContent=error.message; }
 }
 let selectedReferenceKey=null;
 function showReferenceCourseInfo(course) {
   $('reference-course-details').hidden=!course;
+  const analysisPanel = $('reference-course-analysis');
+  analysisPanel.replaceChildren();
   if(!course){$('reference-course-info').replaceChildren();return;}
   const d=course.summary || course.classification,start=course.recordedStart ? new Date(course.recordedStart) : null;
   metrics($('reference-course-info'),[['Course',course.name],['Profil',profileLabel(course.classification)],
@@ -1600,6 +1842,9 @@ function showReferenceCourseInfo(course) {
     ['Durée',Number.isFinite(course.duration) ? time(course.duration) : '—'],
     ['Départ',start ? passageDate(start,0) : '—'],['Arrivée',start && Number.isFinite(course.duration) ? passageDate(start,course.duration) : '—'],
     ['Pauses',Number.isFinite(course.pauses?.duration) ? time(course.pauses.duration) : '—'],['Modèle',course.enabled ? 'Retenue' : 'Exclue']]);
+  const analysis = referenceAnalysisDetails({...course,...d},false);
+  analysisPanel.append(...analysis.sections);
+  analysis.render();
 }
 function selectReferenceCourse(key) {
   selectedReferenceKey=key || null;
@@ -1876,7 +2121,7 @@ $('tour-open').addEventListener('click',openTour);
 $('tour-close').addEventListener('click',closeTour);
 $('tour-next').addEventListener('click',()=>{if(tourIndex<tourSteps.length-1){tourIndex++;renderTour();}else closeTour();});
 $('tour-previous').addEventListener('click',()=>{if(tourIndex){tourIndex--;renderTour();}});
-$('tour-disabled').addEventListener('change',()=>{try{localStorage.setItem('bzhaventure-tour-disabled',$('tour-disabled').checked ? '1' : '0');}catch(_){}});
+$('tour-disabled').addEventListener('change',()=>{if(!hostedAccount)try{localStorage.setItem('bzhaventure-tour-disabled',$('tour-disabled').checked ? '1' : '0');}catch(_){}});
 document.addEventListener('keydown',event=>{
   if(!$('tour-panel').hidden && event.key==='Escape')closeTour();
   if(!$('tour-panel').hidden && event.key==='Tab') {
@@ -1886,7 +2131,7 @@ document.addEventListener('keydown',event=>{
     else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first.focus?.();}
   }
 });
-try{$('tour-disabled').checked=localStorage.getItem('bzhaventure-tour-disabled')==='1';if(!$('tour-disabled').checked)openTour();}catch(_){openTour();}
+if(!hostedAccount)try{$('tour-disabled').checked=localStorage.getItem('bzhaventure-tour-disabled')==='1';if(!$('tour-disabled').checked)openTour();}catch(_){openTour();}
 
 // La migration attend la lecture complète de l’ancien stockage navigateur.
 const legacyRunsReady = new Promise(resolve=>{

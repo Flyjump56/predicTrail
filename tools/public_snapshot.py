@@ -8,7 +8,7 @@ if target.exists():raise SystemExit("La préparation existe déjà : choisir un 
 target.mkdir(parents=True)
 for name in ("src","tests","tools"):
     shutil.copytree(root/name,target/name,ignore=shutil.ignore_patterns("__pycache__","*.pyc"))
-for name in ("lancer.py","predire.py","Demarrer-BZHAventure.cmd","requirements-garmin.txt","requirements-windows.lock",".gitattributes"):
+for name in ("lancer.py","lancer_serveur.py","predire.py","Demarrer-BZHAventure.cmd","requirements-garmin.txt","requirements-windows.lock",".gitattributes"):
     shutil.copy2(root/name,target/name)
 (target/"assets").mkdir()
 for name in ("logo-bzhaventure.png","thème.jpg"):shutil.copy2(root/"assets"/name,target/"assets"/name)
@@ -16,7 +16,7 @@ for name in ("logo-bzhaventure.png","thème.jpg"):shutil.copy2(root/"assets"/nam
 for name in ("ARCHITECTURE.md","FONCTIONNEL.md","MODELE.md"):
     shutil.copy2(root/"docs"/name,target/"docs"/name)
 make_demo(target/"data"/"references")
-(target/".gitignore").write_text(".venv/\nvenv/\n__pycache__/\n*.py[cod]\nbuild/\ndist/\nbackups/\nsorties/\ndata/local/\ndata/parcours/\ndata/references/*\n!data/references/Demonstration-fictive-1.gpx\n!data/references/Demonstration-fictive-2.gpx\n!data/references/Demonstration-fictive-3.gpx\n*.spec\n",encoding="utf-8")
+(target/".gitignore").write_text(".venv/\nvenv/\n__pycache__/\n*.py[cod]\nbuild/\ndist/\nbackups/\nsorties/\n/.predictrail-server/\ndata/local/\ndata/parcours/\ndata/references/*\n!data/references/Demonstration-fictive-1.gpx\n!data/references/Demonstration-fictive-2.gpx\n!data/references/Demonstration-fictive-3.gpx\n*.spec\n",encoding="utf-8")
 (target/"README.md").write_text("""# PrédicTrail — par BZHAventure
 
 Application locale de prédiction des temps de trail et ultra-trail à partir de GPX de référence.
@@ -36,6 +36,11 @@ Les GPX inclus sont des démonstrations fictives, sans activité personnelle. Re
 
 Consulter [Architecture, déploiement et démarrage](docs/ARCHITECTURE.md).
 Le paquet Windows contient Python et les dépendances. Sources testées avec Python 3.15.2.
+
+## Mode serveur avec comptes
+
+Initialiser l’administrateur avec `python lancer_serveur.py --init-admin admin`, puis lancer `python lancer_serveur.py --port 8766`.
+Voir le [guide du mode serveur](docs/ARCHITECTURE.md#mode-serveur-avec-comptes) pour créer les utilisateurs et préparer l’accès HTTPS.
 
 ## Sauvegardes
 

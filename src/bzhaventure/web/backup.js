@@ -6,6 +6,11 @@ const stateFields=['prediction-mode','prediction-model','manual-total','manual-p
  'import-distance-class','import-min-km','import-max-km','import-min-date','import-max-date'];
 const pendingStateChoices={};
 let stateHydrated=false,stateTimer=null,lastAnalysis=null,restoreToken=null,stateSequence=0,stateRetries=0;
+if (hostedAccount) {
+  $('backup-select').hidden=true;
+  $('backup-restore').hidden=true;
+  $('backup-status').textContent='Les sauvegardes concernent uniquement votre compte. La restauration est assurée par la maintenance du serveur.';
+}
 function captureState(){
   if(routeData?.sourceId && selectedFile)lastAnalysis={sourceId:routeData.sourceId,name:selectedFile.name};
   return {runs,settings:Object.fromEntries(stateFields.map(id=>[id,pendingStateChoices[id] ?? $(id).value])),waypoints:customPoints,lastAnalysis,
@@ -22,7 +27,7 @@ function applyClientState(state,resetAnalysis=false){
   }
   restoreDeferredChoices();
   $('tour-disabled').checked=!!state.tourDisabled;
-  try{localStorage.setItem('bzhaventure-tour-disabled',state.tourDisabled ? '1' : '0');}catch(_){}
+  if(!hostedAccount)try{localStorage.setItem('bzhaventure-tour-disabled',state.tourDisabled ? '1' : '0');}catch(_){}
   if(state.tourDisabled)$('tour-panel').hidden=true;
   updatePredictionMode();renderWaypoints();
   if(currentScreen==='simulations')renderRuns();
@@ -33,7 +38,7 @@ function scheduleStateSave(){
   stateTimer=setTimeout(async()=>{
     const sequence=++stateSequence;
     try{await postJSON('/api/state',{state:captureState()});stateRetries=0;}
-    catch(error){if(sequence===stateSequence)$('backup-status').textContent='Réglages non synchronisés : '+error.message+' Les scénarios restent dans ce navigateur ; réessayez la sauvegarde après la mise à jour.';if(stateRetries++<24)setTimeout(scheduleStateSave,5000);}
+    catch(error){if(sequence===stateSequence)$('backup-status').textContent='Réglages non synchronisés : '+error.message+(hostedAccount ? ' Réessayez la sauvegarde avant de quitter la page.' : ' Les scénarios restent dans ce navigateur ; réessayez la sauvegarde après la mise à jour.');if(stateRetries++<24)setTimeout(scheduleStateSave,5000);}
   },600);
 }
 async function hydrateState(attempt=0){
@@ -59,7 +64,7 @@ $('backup-create').addEventListener('click',async()=>{
   try{
     await legacyRunsReady;
     const result=await postJSON('/api/backup/create',{state:captureState()});
-    const link=element('a','Télécharger '+result.name);link.href=result.url;link.download=result.name;
+    const link=element('a','Télécharger '+result.name);link.href=apiUrl(result.url);link.download=result.name;
     $('backup-download').replaceChildren(link);$('backup-status').textContent='Sauvegarde créée · '+(result.bytes/1048576).toFixed(1)+' Mio. Téléchargez-la et copiez-la sur un autre support.';
   }catch(error){$('backup-status').textContent=error.message;}finally{setBackupBusy(false);}
 });
@@ -94,7 +99,7 @@ $('backup-restore').addEventListener('click',async()=>{
 $('resume-analysis').addEventListener('click',async()=>{
   try{
     if(!lastAnalysis)throw Error('Aucun parcours conservé : importez-en un dans Analyse.');
-    const response=await fetch('/api/source?id='+lastAnalysis.sourceId);
+    const response=await apiFetch('/api/source?id='+lastAnalysis.sourceId);
     if(!response.ok)throw Error('Le GPX source n’est pas disponible dans cette sauvegarde.');
     const file=new File([await response.blob()],lastAnalysis.name || 'parcours.gpx',{type:'application/gpx+xml'});
     selectedFile=file;showScreen('analysis');await analyze(file);
@@ -106,7 +111,7 @@ async function showBackups(){
   try{
     const report=await requestJSON('/api/backup/list');$('backup-history').replaceChildren();
     if(report.automatic)$('backup-history').append(element('p',report.automatic.message));
-    for(const item of report.backups){const link=element('a',new Date(item.createdAt).toLocaleString('fr-FR')+' · '+item.label+' · '+(item.bytes/1048576).toFixed(1)+' Mio');link.href='/api/backup/download?token='+item.token;link.download='PredicTrail-'+item.token+'.zip';const row=element('p','');row.append(link);$('backup-history').append(row);}
+    for(const item of report.backups){const link=element('a',new Date(item.createdAt).toLocaleString('fr-FR')+' · '+item.label+' · '+(item.bytes/1048576).toFixed(1)+' Mio');link.href=apiUrl('/api/backup/download?token='+item.token);link.download='PredicTrail-'+item.token+'.zip';const row=element('p','');row.append(link);$('backup-history').append(row);}
   }catch(error){$('backup-history').textContent=error.message;}
 }
 $('backup-refresh').addEventListener('click',showBackups);

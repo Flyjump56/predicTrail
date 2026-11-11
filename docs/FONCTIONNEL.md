@@ -10,6 +10,20 @@ L’application estime les temps de passage d’une personne à partir de ses r�
 
 Les sections suivantes décrivent le comportement actuel. Les annexes repliables conservent les détails et évolutions des anciens guides : une fonction décrite sous une ancienne version peut avoir été déplacée ou remplacée depuis.
 
+## Comptes en mode serveur
+
+Une personne peut choisir **Créer un compte** sur la page de connexion. L’administrateur peut aussi créer des comptes depuis **Administration**. Chaque personne utilise son propre espace pour importer des GPX, établir ses références, calculer ses modèles et comparer ses courses. L’espace commence vide. Les analyses manuelles ou enregistrées restent disponibles avant l’import de références chronométrées.
+
+Les réglages, scénarios et sauvegardes sont rattachés au compte. La connexion Garmin facultative est également propre à l’espace de travail. Le bouton **Paramètres du compte** dans le bandeau affiche l’identifiant et le rôle et permet de modifier le mot de passe. **Se déconnecter** met fin à la session. Le bouton **Administration** figure dans la rangée des onglets pour le compte administrateur.
+
+**Administration** affiche les connexions réussies, la dernière connexion en UTC, le temps de connexion estimé et le nombre de traces du dernier modèle calculé. Le suivi commence avec cette version et compte au plus cinq minutes entre deux requêtes. Depuis **Mot de passe oublié**, un utilisateur peut signaler une demande à l’administrateur. Celui-ci peut saisir ou générer un mot de passe provisoire et le transmettre en privé. La réinitialisation d’accès ferme les sessions du compte et impose un nouveau mot de passe à la connexion. Les données sportives et les statistiques du compte sont conservées.
+
+Dans la colonne **Traces dans le modèle**, **Détail par modèle** affiche les effectifs du modèle global, du modèle par inclinaison et des groupes par profil et distance. Pour chaque groupe, il distingue les courses de la classe exacte et celles du même profil utilisées par le modèle de groupe. Si le catalogue retient le repli global, aucune course n’est comptée dans la contribution locale. Les effectifs sont enregistrés après le calcul ou le chargement du modèle.
+
+Dans **Courses de référence et modèle prédictif** et **Carte des références**, l’administrateur peut choisir le compte consulté. Cette vue permet de lire les analyses, les modèles et les traces cartographiques du compte. Le sélecteur **Mon compte** ramène à la bibliothèque de l’administrateur. Les imports, la sélection des références, les exports et les prédictions restent rattachés à son propre espace.
+
+La colonne **Calculs et progression** d’Administration suit l’import Garmin et la mise à jour des références et des modèles par compte. Elle affiche l’étape, le pourcentage, les compteurs disponibles et la durée. Les écrans de consultation affichent le suivi du compte choisi et actualisent la vue à la fin du calcul. Le suivi est actualisé toutes les deux secondes environ et présente les opérations du serveur en cours d’exécution.
+
 ## Analyse d’un parcours
 
 Choisir un GPX avec coordonnées et altitudes, puis sélectionner un mode : modèle appris, durée totale, allure au kilomètre ou temps enregistrés. Le dernier mode exige des dates ordonnées et une durée positive ; il reprend les temps du fichier sans prédiction. Les deux modes manuels permettent de calculer sans références initialisées.

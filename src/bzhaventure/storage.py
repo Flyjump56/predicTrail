@@ -162,6 +162,35 @@ class Store:
                     sources.append(dict(key="activity:" + row["id"], name=row["name"], enabled=False))
         return [dict(key=s["key"], name=s["name"], enabled=s["enabled"]) for s in sources]
 
+    def read_reference_gpx(self, key, directory, limit):
+        """Relire la trace stockée, indépendamment de son inclusion dans le modèle."""
+        if not isinstance(key, str):
+            raise ValueError("Référence inconnue.")
+        if key.startswith("activity:"):
+            with self.connection() as db:
+                row = db.execute(
+                    "SELECT length(gpx), CASE WHEN length(gpx) <= ? THEN gpx END FROM activities WHERE id=?",
+                    (limit, key[9:]),
+                ).fetchone()
+            if row is None:
+                raise ValueError("Activité locale introuvable.")
+            if row[0] > limit:
+                raise ValueError("Le GPX source est limité à 100 Mio.")
+            return row[1]
+
+        directory = Path(directory).resolve()
+        for path in directory.glob("*"):
+            if path.suffix.lower() != ".gpx":
+                continue
+            resolved = path.resolve()
+            if key == "file:" + str(resolved) and resolved.parent == directory and resolved.is_file():
+                with resolved.open("rb") as source:
+                    data = source.read(limit + 1)
+                if len(data) > limit:
+                    raise ValueError("Le GPX source est limité à 100 Mio.")
+                return data
+        raise ValueError("Fichier de référence introuvable.")
+
     def select_reference(self, key, enabled, directory):
         if not isinstance(enabled, bool):
             raise ValueError("Sélection de référence incorrecte.")
