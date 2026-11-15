@@ -24,6 +24,16 @@ Dans **Courses de référence et modèle prédictif** et **Carte des référence
 
 La colonne **Calculs et progression** d’Administration suit l’import Garmin et la mise à jour des références et des modèles par compte. Elle affiche l’étape, le pourcentage, les compteurs disponibles et la durée. Les écrans de consultation affichent le suivi du compte choisi et actualisent la vue à la fin du calcul. Le suivi est actualisé toutes les deux secondes environ et présente les opérations du serveur en cours d’exécution.
 
+## Planning de préparation
+
+Enregistrer la course objectif avec son nom, sa date et éventuellement un fichier GPX. L’assistant propose un plan trail long de douze semaines, un plan de quatre semaines et un planning libre. Le plan long reprend les créneaux et types des deux classeurs fournis, avec le premier créneau placé le mardi pour un objectif le samedi. Pour les autres dates, les séances sont décalées du même nombre de jours que la course. Les durées manquantes dans les exemples sont complétées par les valeurs du catalogue.
+
+Choisir un pourcentage de durée, prévisualiser le volume, puis ajouter les séances au calendrier. Cliquer sur un jour pour ajouter une séance ou sur une séance pour modifier sa date, sa durée et sa note. Une séance peut se répéter chaque semaine. Les types et leurs durées par défaut sont modifiables, et le bilan de la semaine sélectionnée indique le nombre de séances et leur durée totale. Le planning et la trace associée sont enregistrés dans l’espace du compte.
+
+Les séances issues de l’assistant suivent le jour J si la date de la course est modifiée. Une séance saisie ou déplacée manuellement garde sa date. La vue annuelle affiche les douze mois avec leurs semaines et ouvre le jour choisi dans la vue mensuelle. Les deux vues utilisent la numérotation ISO des semaines, du lundi au dimanche. Les pictogrammes distinguent les types de séances et les boutons permettent d’ajouter une séance à la date sélectionnée. La suppression par semaine concerne les entraînements du lundi au dimanche de la date choisie.
+
+**Exporter en Excel** télécharge le calendrier complet avec les onglets Calendrier, Bilan hebdomadaire et Types de séances. Dans **Impression du planning**, renseigner une date de début et une date de fin incluses, puis choisir une liste détaillée ou un calendrier. Le calendrier imprimé couvre jusqu’à 366 jours. L’état reprend les entrées et les totaux hebdomadaires de la période. La boîte de dialogue du navigateur permet aussi de l’enregistrer en PDF.
+
 ## Analyse d’un parcours
 
 Choisir un GPX avec coordonnées et altitudes, puis sélectionner un mode : modèle appris, durée totale, allure au kilomètre ou temps enregistrés. Le dernier mode exige des dates ordonnées et une durée positive ; il reprend les temps du fichier sans prédiction. Les deux modes manuels permettent de calculer sans références initialisées.

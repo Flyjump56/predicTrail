@@ -1,5 +1,5 @@
 """Vérifier l'accès HTTP au mode serveur avec deux sessions distinctes."""
-from base64 import b64encode
+from base64 import b64decode, b64encode
 from http.client import HTTPResponse
 from io import BytesIO
 import json
@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 from time import monotonic, sleep
 from urllib.parse import urlencode
 import unittest
+from zipfile import ZipFile
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -62,17 +63,26 @@ class HostedTests(unittest.TestCase):
                 self.check_accounts(server, password)
 
     def check_accounts(self, server, password):
-        def request(path, *, cookie="", form=None, data=None, origin=None):
+        def request(path, *, cookie="", form=None, data=None, origin=None, photo=None):
             headers = {"Host": server.host, "Cookie": cookie, "Origin": origin or server.origin}
             body = None
             if form is not None:
                 headers["Content-Type"] = "application/x-www-form-urlencoded"
                 body = urlencode(form)
+                if photo is not None:
+                    boundary = "profile-test"
+                    headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+                    body = b"".join(
+                        f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode()
+                        for key, value in form.items()
+                    )
+                    body += (f'--{boundary}\r\nContent-Disposition: form-data; name="photo"; filename="photo.png"\r\n'
+                             'Content-Type: image/png\r\n\r\n').encode() + photo + f"\r\n--{boundary}--\r\n".encode()
             if data is not None:
                 headers["Content-Type"] = "application/json"
                 body = json.dumps(data)
             method = "GET" if body is None else "POST"
-            payload = (body or "").encode()
+            payload = body if isinstance(body, bytes) else (body or "").encode()
             headers["Content-Length"] = str(len(payload))
             header_lines = "".join(f"{name}: {value}\r\n" for name, value in headers.items())
             socket = BufferedSocket(f"{method} {path} HTTP/1.0\r\n{header_lines}\r\n".encode() + payload)
@@ -80,7 +90,10 @@ class HostedTests(unittest.TestCase):
             socket.request = BytesIO(socket.response)
             response = HTTPResponse(socket)
             response.begin()
-            return response.status, response.getheader("Set-Cookie"), response.read().decode("utf-8")
+            payload = response.read()
+            if not response.getheader("Content-Type", "").startswith(("image/","application/vnd.openxmlformats-")):
+                payload = payload.decode("utf-8")
+            return response.status, response.getheader("Set-Cookie"), payload
 
         def login(username):
             status, cookie, _ = request("/connexion", form=dict(username=username, password=password))
@@ -118,6 +131,7 @@ class HostedTests(unittest.TestCase):
         self.assertNotIn('id="admin-reference-map"', runner_dashboard)
         self.assertNotIn('id="tab-administration"', runner_dashboard)
         self.assertIn('href="/parametres-compte"', runner_dashboard)
+        self.assertIn('id="account-course-stats"', runner_dashboard)
         status, _, settings = request("/parametres-compte", cookie=runner_cookie)
         self.assertEqual(status, 200)
         self.assertIn("<dd>coureur</dd>", settings)
@@ -139,6 +153,21 @@ class HostedTests(unittest.TestCase):
 
         wait_for_operation(admin_prefix, admin_cookie)
         wait_for_operation(runner_prefix, runner_cookie)
+        planning_path = runner_prefix + "/api/planning"
+        self.assertIsNone(json.loads(request(planning_path, cookie=runner_cookie)[2])["planning"])
+        status, _, payload = request(planning_path + "/trace", cookie=runner_cookie,
+                                     data={"gpx":b64encode(gpx_bytes(2)).decode()})
+        self.assertEqual(status, 200)
+        source = json.loads(payload)["sourceId"]
+        plan = {"types":[{"name":"Course","minutes":60}],
+                "sessions":[{"date":"2027-05-10","type":"Course","minutes":45,"note":"Endurance"}],
+                "goal":{"name":"Trail","date":"2027-06-05","sourceId":source,"filename":"trail.gpx"}}
+        status, _, payload = request(planning_path, cookie=runner_cookie, data={"planning":plan,"revision":None})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(request(planning_path, cookie=runner_cookie)[2]), json.loads(payload))
+        self.assertEqual(request(planning_path, cookie=runner_cookie, data={"planning":plan,"revision":None})[0], 409)
+        self.assertIsNone(json.loads(request(admin_prefix + "/api/planning", cookie=admin_cookie)[2])["planning"])
+        self.assertEqual(request(admin_prefix + "/api/source?id="+source, cookie=admin_cookie)[0], 404)
         state = dict(runs=[], settings={"manual-total": "08:42"}, waypoints=[], tourDisabled=True)
         self.assertEqual(request(admin_prefix + "/api/state", cookie=admin_cookie, data={"state": state})[0], 200)
         self.assertEqual(json.loads(request(admin_prefix + "/api/state", cookie=admin_cookie)[2])["state"]["settings"], state["settings"])
@@ -161,6 +190,31 @@ class HostedTests(unittest.TestCase):
         user_upload = {"name": "Trace du coureur", "gpx": b64encode(gpx_bytes(2)).decode()}
         self.assertEqual(request(runner_prefix + "/api/local/upload", cookie=runner_cookie, data=user_upload)[0], 202)
         self.assertEqual(wait_for_operation(runner_prefix, runner_cookie)["status"], "ready")
+        status, _, calendar = request(planning_path + "/references", cookie=runner_cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual([course["name"] for course in json.loads(calendar)["courses"]], ["Trace du coureur"])
+        status, _, workbook = request(planning_path + "/export", cookie=runner_cookie)
+        self.assertEqual(status, 200)
+        with ZipFile(BytesIO(workbook)) as archive:
+            calendar_xml = archive.read("xl/worksheets/sheet1.xml").decode()
+            self.assertIn("Trace du coureur", calendar_xml)
+            self.assertIn("Endurance", calendar_xml)
+            self.assertNotIn("Trace privée", calendar_xml)
+        self.assertEqual(request(planning_path + "/print", cookie=runner_cookie)[0], 400)
+        status, _, report = request(planning_path + "/print?start=2027-05-10&end=2027-05-10", cookie=runner_cookie)
+        self.assertEqual(status, 200)
+        self.assertIn("Bilan hebdomadaire", report)
+        self.assertIn("Endurance", report)
+        self.assertIn("45 min (0 h 45 min)", report)
+        self.assertNotIn("Trace du coureur", report)
+        status, _, report = request(planning_path + "/print?start=2027-05-10&end=2027-05-16&layout=calendar",
+                                    cookie=runner_cookie)
+        self.assertEqual(status, 200)
+        self.assertIn('class="calendar"', report)
+        self.assertIn("Endurance", report)
+        self.assertEqual(request(planning_path + "/export", cookie=admin_cookie)[0], 403)
+        self.assertNotIn("trace", json.loads(calendar)["courses"][0])
+        self.assertEqual(request(planning_path + "/references", cookie=admin_cookie)[0], 403)
         status, _, payload = request(admin_prefix + "/api/admin/operations", cookie=admin_cookie)
         self.assertEqual(status, 200)
         operations = json.loads(payload)["operations"]
@@ -199,6 +253,36 @@ class HostedTests(unittest.TestCase):
         self.assertNotEqual(request(runner_prefix + backup_path, cookie=runner_cookie)[0], 200)
         self.assertEqual(request("/inscription", form={"username":"autonome","password":password,
                                                        "confirmation":password,"admin":"1"})[0], 200)
+        photo = b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aH1sAAAAASUVORK5CYII=")
+        profile = dict(username="avec-photo", password=password, confirmation=password,
+                       gender="nonbinary", **{"birth-date": "1990-05-16"})
+        self.assertEqual(request("/inscription", form=profile, photo=b"<svg/>")[0], 400)
+        self.assertEqual(request("/inscription", form=profile, photo=photo)[0], 200)
+        profile_cookie, _ = login("avec-photo")
+        settings = request("/parametres-compte", cookie=profile_cookie)[2]
+        self.assertIn("Non binaire", settings)
+        self.assertIn("1990-05-16", settings)
+        self.assertEqual(request("/photo-profil", cookie=profile_cookie)[2], photo)
+        self.assertEqual(request("/parametres-compte", cookie=profile_cookie,
+                                 form={"gender":"nonbinary","birth-date":"1990-05-16","remove-photo":"yes"}, photo=b"")[0], 200)
+        self.assertEqual(request("/photo-profil", cookie=profile_cookie)[0], 404)
+        self.assertEqual(request("/administration", cookie=admin_cookie,
+                                 form={"action":"profile","username":"avec-photo","gender":"nonbinary","birth-date":"1990-05-16"},
+                                 photo=photo)[0], 200)
+        self.assertEqual(request("/photo-profil", cookie=profile_cookie)[2], photo)
+        self.assertEqual(request("/parametres-compte", cookie=profile_cookie,
+                                 form={"username": "admin", "gender": "woman", "birth-date": "1992-02-29"})[0], 200)
+        self.assertIn("1992-02-29", request("/parametres-compte", cookie=profile_cookie)[2])
+        self.assertNotIn("1992-02-29", request("/parametres-compte", cookie=admin_cookie)[2])
+        edit = {"action": "profile", "username": "avec-photo", "gender": "other", "birth-date": ""}
+        self.assertEqual(request("/administration", cookie=profile_cookie, form=edit)[0], 403)
+        self.assertEqual(request("/administration", cookie=admin_cookie, form={**edit, "birth-date": "2999-01-01"})[0], 400)
+        self.assertEqual(request("/administration", cookie=admin_cookie, form=edit)[0], 200)
+        settings = request("/parametres-compte", cookie=profile_cookie)[2]
+        self.assertIn("<dd>Autre</dd>", settings)
+        self.assertIn("<dd>Non renseignée</dd>", settings)
+        self.assertEqual(request("/photo-profil", cookie=admin_cookie)[0], 404)
+        self.assertEqual(request("/photo-profil")[0], 404)
         own_cookie, own_prefix = login("autonome")
         self.assertEqual(request("/administration", cookie=own_cookie)[0], 403)
         self.assertEqual(request("/mot-de-passe-oublie", form={"username":"autonome"})[0], 200)

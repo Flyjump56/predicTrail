@@ -2,6 +2,8 @@
 import argparse
 from collections import deque
 from datetime import datetime, timezone
+from email.parser import BytesParser
+from email.policy import default
 from getpass import getpass
 from html import escape
 from http.cookies import CookieError, SimpleCookie
@@ -19,7 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 from zipfile import BadZipFile
 
-from .accounts import Accounts, SESSION_SECONDS
+from .accounts import Accounts, GENDERS, MAX_PROFILE_PHOTO, SESSION_SECONDS
 from .backup import Backups, MAX_ARCHIVE
 from .garmin import GarminConnection
 from .server import Dashboard, STATIC_FILES, StartupStatus, start_update
@@ -33,6 +35,33 @@ LOGIN_FIELDS = """
 <label>Identifiant <input name="username" autocomplete="username" required maxlength="40"></label>
 <label>Mot de passe <input name="password" type="password" autocomplete="current-password" required maxlength="256"></label>
 """
+PROFILE_FIELDS = """
+<label>Genre (facultatif)<select name="gender"><option value="">Ne pas renseigner</option>
+""" + "".join(f'<option value="{key}">{label}</option>' for key, label in GENDERS.items()) + """
+</select></label>
+<label>Date de naissance (facultative)<input type="date" name="birth-date"></label>
+<label>Photo de profil (facultative, JPEG ou PNG, 2 Mio maximum)
+<input type="file" name="photo" accept="image/jpeg,image/png"></label>
+"""
+
+
+def profile_editor(user, *, admin=False):
+    genders = {"": "Ne pas renseigner", **GENDERS}
+    current_gender = user["gender"] or ""
+    options = "".join(
+        f'<option value="{key}"{" selected" if key == current_gender else ""}>{label}</option>'
+        for key, label in genders.items()
+    )
+    target = "/administration" if admin else "/parametres-compte"
+    account = (f'<input type="hidden" name="username" value="{escape(user["username"])}">'
+               '<input type="hidden" name="action" value="profile">') if admin else ""
+    remove = '<label><input type="checkbox" name="remove-photo" value="yes"> Supprimer la photo actuelle</label>' if user["photo_type"] else ""
+    return f"""<form method="post" action="{target}" enctype="multipart/form-data" class="account-form">{account}
+<label>Genre<select name="gender">{options}</select></label>
+<label>Date de naissance (facultative)<input type="date" name="birth-date" value="{escape(user["birth_date"] or "")}"></label>
+<label>Photo de profil · JPEG ou PNG, 2 Mio maximum
+<input type="file" name="photo" accept="image/jpeg,image/png"></label>{remove}
+<button class="button">Enregistrer le profil</button></form>"""
 
 
 def account_storage(directory, account_id):
@@ -227,11 +256,11 @@ class HostedDashboard(Dashboard):
     def registration(self, message="", status=200):
         self.page("Créer un compte", f"""
 <p role="status">{escape(message)}</p>
-<form method="post" action="/inscription" class="account-form">
+<form method="post" action="/inscription" enctype="multipart/form-data" class="account-form">
 <label>Identifiant <input name="username" autocomplete="username" required minlength="3" maxlength="40"></label>
 <label>Mot de passe <input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="256"></label>
 <label>Confirmer le mot de passe <input name="confirmation" type="password" autocomplete="new-password" required maxlength="256"></label>
-<button class="button">Créer mon compte</button></form><p><a href="/">Retour à la connexion</a></p>""", status)
+{PROFILE_FIELDS}<button class="button">Créer mon compte</button></form><p><a href="/">Retour à la connexion</a></p>""", status)
 
     def forgot_password(self, message="", status=200):
         self.page("Mot de passe oublié", f"""
@@ -265,15 +294,16 @@ class HostedDashboard(Dashboard):
 <input type="hidden" name="action" value="reset">
 <label><input type="checkbox" name="confirm" value="yes" required> Révoquer les sessions et générer un mot de passe provisoire</label>
 <button class="button">Réinitialiser l’accès</button></form></details>"""
+            actions += f"<details><summary>Modifier le profil</summary>{profile_editor(user, admin=True)}</details>"
             rows.append(f"""<tr><th scope="row">{username}</th><td>{role}</td><td>{user["login_count"]}</td>
 <td>{last}</td><td>{duration}</td><td>{traces}</td><td>{operation_progress_html(user["id"])}</td><td>{actions}</td></tr>""")
         self.page("Administration des comptes", f"""
 <p><a href="/">Retour à PrédicTrail</a></p><p role="status">{escape(message)}</p>
 <details><summary>Créer un compte utilisateur</summary>
-<form method="post" action="/administration" class="account-form">
+<form method="post" action="/administration" enctype="multipart/form-data" class="account-form">
 <label>Identifiant <input name="username" required minlength="3" maxlength="40"></label>
 <label>Mot de passe initial <input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="256"></label>
-<button class="button">Créer le compte</button></form></details>
+{PROFILE_FIELDS}<button class="button">Créer le compte</button></form></details>
 <div class="scroll"><table class="account-table"><caption>Suivi des comptes utilisateurs</caption>
 <thead><tr><th scope="col">Compte</th><th scope="col">Rôle</th><th scope="col">Connexions</th>
 <th scope="col">Dernière connexion</th><th scope="col">Temps de connexion estimé</th>
@@ -282,9 +312,12 @@ class HostedDashboard(Dashboard):
 <p>Le temps est estimé à partir de l’activité du navigateur, avec cinq minutes au maximum entre deux requêtes. Les statistiques commencent avec cette version. Le nombre de traces correspond au dernier modèle calculé. Un tiret indique qu’il n’est pas encore disponible.</p>{operations_script(account)}""",
                   status, wide=True, account_header=f"<header>{self.account_bar(account)}</header>")
 
-    def account_bar(self, user):
+    def account_bar(self, user, *, show_course_stats=False):
+        photo = '<img class="account-avatar" src="/photo-profil" alt="">' if user["photo_type"] else ""
+        stats = '<small id="account-course-stats">Chargement du bilan des courses…</small>' if show_course_stats else ""
         return f"""
-<div class="account-bar no-print"><strong>Bienvenue, {escape(user["username"])} !</strong>
+<div class="account-bar no-print">{photo}<div><strong>Bienvenue, {escape(user["username"])} !</strong>
+{stats}</div>
 <a class="button" href="/parametres-compte"><span aria-hidden="true">⚙</span> Paramètres du compte</a>
 <form method="post" action="/deconnexion"><button class="button">Se déconnecter</button></form></div>
 """
@@ -292,7 +325,7 @@ class HostedDashboard(Dashboard):
     def dashboard(self, user):
         html = PAGE.read_text(encoding="utf-8").replace(
             "<body>", f'<body data-account="{user["id"]}">', 1)
-        html = html.replace("</header>", self.account_bar(user) + "</header>", 1)
+        html = html.replace("</header>", self.account_bar(user, show_course_stats=True) + "</header>", 1)
         if user["admin"]:
             html = html.replace("<!-- admin-navigation -->",
                                 '<a class="button" href="/administration" id="tab-administration">Administration</a>', 1)
@@ -315,7 +348,10 @@ class HostedDashboard(Dashboard):
         notice = "<p>Choisissez un nouveau mot de passe pour activer votre accès.</p>" if user["must_change"] else ""
         self.page("Paramètres du compte", f"""
 <p><a href="/">Retour à PrédicTrail</a></p><p role="status">{escape(message)}</p>
-<dl><dt>Identifiant</dt><dd>{escape(user["username"])}</dd><dt>Rôle</dt><dd>{role}</dd></dl>
+<dl><dt>Identifiant</dt><dd>{escape(user["username"])}</dd><dt>Rôle</dt><dd>{role}</dd>
+<dt>Genre</dt><dd>{GENDERS.get(user["gender"], "Non renseigné")}</dd>
+<dt>Date de naissance</dt><dd>{escape(user["birth_date"] or "Non renseignée")}</dd></dl>
+{'' if user["must_change"] else profile_editor(user)}
 <h2>Modifier mon mot de passe</h2>{notice}
 <form method="post" action="/mot-de-passe" class="account-form">
 <label>Mot de passe actuel <input name="password" type="password" autocomplete="current-password" required maxlength="256"></label>
@@ -343,15 +379,46 @@ class HostedDashboard(Dashboard):
             self.account_runtime = self.server.runtime_for(user["id"])
         return True
 
-    def read_form(self):
+    def read_form(self, *, with_profile=False):
         try:
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             size = 0
+        if with_profile and self.headers.get_content_type() == "multipart/form-data":
+            if not 0 < size <= MAX_PROFILE_PHOTO + 8192:
+                raise ValueError("Photo de profil limitée à 2 Mio.")
+            header = self.headers["Content-Type"].encode("ascii")
+            message = BytesParser(policy=default).parsebytes(
+                b"Content-Type: " + header + b"\r\n\r\n" + self.rfile.read(size))
+            if not message.is_multipart() or message.defects:
+                raise ValueError("Formulaire incorrect.")
+            fields = {}
+            for part in message.iter_parts():
+                name = part.get_param("name", header="content-disposition")
+                if (part.is_multipart() or part.get_content_disposition() != "form-data" or
+                        name not in {"username", "password", "confirmation", "gender", "birth-date", "photo", "action", "remove-photo"} or
+                        name in fields):
+                    raise ValueError("Formulaire incorrect.")
+                data = part.get_payload(decode=True)
+                if name != "photo" and len(data) > 2048:
+                    raise ValueError("Champ de profil trop long.")
+                fields[name] = data if name == "photo" else data.decode("utf-8")
+            return fields
         if self.headers.get_content_type() != "application/x-www-form-urlencoded" or not 0 < size <= 8192:
             raise ValueError("Formulaire incorrect.")
         fields = parse_qs(self.rfile.read(size).decode("utf-8"), keep_blank_values=True, max_num_fields=4)
         return {name: values[0] for name, values in fields.items()}
+
+    def create_profile_account(self, fields):
+        self.server.accounts.create(fields.get("username", ""), fields.get("password", ""),
+                                    gender=fields.get("gender", ""), birth_date=fields.get("birth-date", ""),
+                                    photo=fields.get("photo") if isinstance(fields.get("photo"), bytes) else None)
+
+    def update_account_profile(self, account_id, fields):
+        photo = fields.get("photo")
+        self.server.accounts.update_profile(
+            account_id, fields.get("gender", ""), fields.get("birth-date", ""),
+            photo=photo if isinstance(photo, bytes) else None, remove_photo=fields.get("remove-photo") == "yes")
 
     def admin_reference_view(self, user):
         parsed = urlsplit(self.path)
@@ -405,6 +472,12 @@ class HostedDashboard(Dashboard):
                 self.send_json({"error": "Accès administrateur requis."}, 403)
         elif self.path in ("/parametres-compte", "/mot-de-passe"):
             self.password_page(user) if user else self.redirect("/")
+        elif self.path == "/photo-profil":
+            photo = self.server.accounts.profile_photo(user["id"]) if user else None
+            if photo is None:
+                self.send_json({"error": "Photo indisponible."}, 404)
+            else:
+                self.reply(photo["photo"], photo["photo_type"])
         elif self.authorize_api(user) and not self.admin_reference_view(user):
             super().do_GET()
 
@@ -436,11 +509,11 @@ class HostedDashboard(Dashboard):
                 self.registration("Trop de tentatives. Réessayez dans une minute.", 429)
                 return
             try:
-                fields = self.read_form()
-                username, password = fields.get("username", ""), fields.get("password", "")
+                fields = self.read_form(with_profile=True)
+                password = fields.get("password", "")
                 if password != fields.get("confirmation"):
                     raise ValueError("Les mots de passe ne correspondent pas.")
-                self.server.accounts.create(username, password)
+                self.create_profile_account(fields)
                 self.registration("Compte créé. Retournez à la connexion pour ouvrir votre espace.")
             except ValueError as error:
                 self.registration(str(error), 400)
@@ -463,12 +536,16 @@ class HostedDashboard(Dashboard):
                 self.send_json({"error": "Accès administrateur requis."}, 403)
                 return
             try:
-                fields = self.read_form()
+                fields = self.read_form(with_profile=True)
                 username = fields.get("username", "")
                 action = fields.get("action", "create")
                 if action == "create":
-                    self.server.accounts.create(username, fields.get("password", ""))
+                    self.create_profile_account(fields)
                     self.administration(user, "Compte créé.")
+                elif action == "profile":
+                    account_id = self.server.accounts.account_id(username)
+                    self.update_account_profile(account_id, fields)
+                    self.administration(user, "Profil mis à jour.")
                 elif action == "password":
                     self.server.accounts.set_user_password(username, fields.get("password", ""))
                     self.administration(user, "Mot de passe provisoire défini. Les sessions du compte ont été fermées.")
@@ -480,6 +557,20 @@ class HostedDashboard(Dashboard):
                     raise ValueError("Action incorrecte ou réinitialisation non confirmée.")
             except ValueError as error:
                 self.administration(user, str(error), 400)
+        elif self.path == "/parametres-compte":
+            if not user or user["must_change"]:
+                self.redirect("/mot-de-passe" if user else "/")
+                return
+            try:
+                fields = self.read_form(with_profile=True)
+                self.update_account_profile(user["id"], fields)
+                updated = self.server.accounts.user(token)
+                if updated is None:
+                    self.redirect("/")
+                else:
+                    self.password_page(updated, "Profil mis à jour.")
+            except ValueError as error:
+                self.password_page(user, str(error), 400)
         elif self.path == "/mot-de-passe":
             if not user:
                 self.redirect("/")

@@ -584,6 +584,55 @@ input[type="range"],input[type="checkbox"],progress { accent-color:#21677d; }
 .account-form .button { justify-self:start; }
 .account-bar { display:flex; align-items:center; flex-wrap:wrap; gap:14px; padding:8px 20px; }
 .account-bar form { margin-left:auto; }
+#account-course-stats { display:block; }
+.account-avatar { width:42px; height:42px; border-radius:50%; object-fit:cover; }
+#planning-controls { min-width:0; }
+#planning-controls details { margin:12px 0; }
+.planning-month-controls { align-items:center; }
+.planning-month-controls h3 { margin:0; text-transform:capitalize; }
+.planning-view-toggle { display:flex; gap:4px; }
+.planning-view-toggle .button[aria-pressed="true"] { background:#244e6a; box-shadow:inset 0 -3px #a7c6dc; }
+.planning-view-toggle .button[aria-pressed="false"] { background:#e8f0f6; color:#244e6a; }
+.planning-calendar { table-layout:fixed; min-width:620px; white-space:normal; }
+.planning-calendar td { vertical-align:top; border:1px solid var(--line); height:82px; padding:5px 7px; }
+.planning-calendar td button { display:block; width:100%; text-align:left; padding:3px 4px; cursor:pointer; }
+.planning-calendar td .planning-entry,.button.planning-type-shortcut,.planning-type-label {
+    border-inline-start:3px solid hsl(var(--planning-type-hue),60%,39%);
+    background:hsl(var(--planning-type-hue),65%,93%);
+    color:#16252e;
+}
+.planning-calendar td .planning-entry { border-radius:4px; margin-top:3px; overflow-wrap:anywhere; font-size:.85rem; }
+.planning-type-label { border-radius:4px; padding:3px 7px; }
+.planning-calendar strong { display:block; color:#743611; overflow-wrap:anywhere; }
+.planning-other-month { background:#f5f7f8; }
+.planning-calendar .planning-selected { box-shadow:inset 0 0 0 2px var(--accent); }
+.planning-year:not([hidden]) { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr)); gap:10px; }
+.planning-year-month { display:grid; align-content:start; gap:5px; text-align:left; border:1px solid var(--line); background:#f5f7f8; border-radius:8px; padding:12px; }
+.planning-week-number { width:3rem; text-align:center; color:#495a65; font-variant-numeric:tabular-nums; }
+.planning-week-actions { align-items:center; }
+.planning-week-actions p { margin:0; }
+#planning-print-preview iframe { display:block; width:100%; height:65vh; border:1px solid var(--line); margin-top:8px; background:#fff; }
+.planning-year-month-title { justify-self:start; border:0; background:none; color:var(--accent); padding:0; cursor:pointer; font:inherit; font-weight:700; text-transform:capitalize; }
+.planning-mini-calendar { table-layout:fixed; font-variant-numeric:tabular-nums; }
+.planning-mini-calendar th,.planning-mini-calendar td { text-align:center; padding:2px; }
+.planning-mini-calendar .planning-week-number { width:2rem; }
+.planning-mini-calendar td button { width:100%; min-height:24px; color:inherit; font-weight:500; cursor:pointer; }
+.planning-mini-types { display:flex; justify-content:center; flex-wrap:wrap; gap:2px; }
+.planning-type-dot { width:5px; height:5px; border-radius:50%; background:hsl(var(--planning-type-hue),60%,39%); }
+.mini-reference { text-decoration:underline; text-underline-offset:3px; }
+.planning-mini-calendar td button.mini-goal,.mini-goal { background:#f8dfc7; font-weight:700; }
+.planning-quick { margin:16px 0; }
+#planning-selected-sessions { padding:0; list-style:none; }
+#planning-selected-sessions li { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; padding:6px 0; }
+#planning-selected-sessions li span { margin-right:8px; }
+#planning-selected-sessions button { cursor:pointer; }
+.planning-session-instructions { flex-basis:100%; margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.button.planning-danger { background:#833b2f; }
+.planning-calendar td .planning-reference,#planning-selected-sessions .planning-reference {
+    display:block; color:#214e36; background:#e3f2e9; border-inline-start:3px solid #378058;
+    border-radius:4px; margin-top:3px; padding:3px 7px; overflow-wrap:anywhere; text-align:left;
+}
+.planning-reference:hover,.planning-reference:focus-visible { text-decoration:underline; }
 #reference-map-list tr { cursor:pointer; }
 #reference-map-list tr:hover,#reference-map-list tr:focus { background:#e8f0f6; }
 #reference-course-select { width:100%; max-width:650px; margin:6px 0; }

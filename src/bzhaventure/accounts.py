@@ -1,5 +1,6 @@
 """Comptes et sessions du mode serveur, séparés des bibliothèques GPX."""
 from contextlib import closing
+from datetime import date
 from hashlib import pbkdf2_hmac, sha256
 from hmac import compare_digest
 import json
@@ -15,6 +16,8 @@ SESSION_SECONDS = 12 * 3600
 IDLE_SECONDS = 300
 ACTIVITY_WRITE_SECONDS = 15
 USERNAME = re.compile(r"[a-z0-9][a-z0-9._-]{2,39}", re.ASCII)
+GENDERS = {"woman": "Femme", "man": "Homme", "nonbinary": "Non binaire", "other": "Autre"}
+MAX_PROFILE_PHOTO = 2 * 1024 * 1024
 
 
 def password_hash(password, salt):
@@ -23,6 +26,31 @@ def password_hash(password, salt):
 
 def normalize_username(value):
     return value.strip().lower()
+
+
+def validate_profile(gender, birth_date):
+    if gender and gender not in GENDERS:
+        raise ValueError("Genre incorrect.")
+    if birth_date:
+        try:
+            birthday = date.fromisoformat(birth_date)
+            if birthday.isoformat() != birth_date or birthday > date.today():
+                raise ValueError
+        except ValueError:
+            raise ValueError("Indiquez une date de naissance valide et non future.") from None
+    return gender or None, birth_date or None
+
+
+def profile_photo_type(photo):
+    if not photo:
+        return None
+    if len(photo) > MAX_PROFILE_PHOTO:
+        raise ValueError("Photo de profil limitée à 2 Mio.")
+    if photo.startswith(b"\x89PNG\r\n\x1a\n") and photo[12:16] == b"IHDR" and photo.endswith(b"IEND\xaeB`\x82"):
+        return "image/png"
+    if photo.startswith(b"\xff\xd8\xff") and photo.endswith(b"\xff\xd9"):
+        return "image/jpeg"
+    raise ValueError("Choisissez une photo au format JPEG ou PNG.")
 
 
 class Accounts:
@@ -51,6 +79,10 @@ class Accounts:
                     "must_change": "INTEGER NOT NULL DEFAULT 0",
                     "model_count": "INTEGER",
                     "model_groups": "TEXT",
+                    "gender": "TEXT",
+                    "birth_date": "TEXT",
+                    "photo": "BLOB",
+                    "photo_type": "TEXT",
                 },
                 "sessions": {"last_seen": "REAL"},
             }
@@ -65,12 +97,14 @@ class Accounts:
         db.row_factory = sqlite3.Row
         return db
 
-    def create(self, username, password, *, first_admin=False):
+    def create(self, username, password, *, first_admin=False, gender="", birth_date="", photo=None):
         username = normalize_username(username)
         if not USERNAME.fullmatch(username):
             raise ValueError("Identifiant de 3 à 40 caractères : lettres non accentuées, chiffres, point, tiret ou soulignement.")
         if not 12 <= len(password) <= 256:
             raise ValueError("Le mot de passe doit contenir de 12 à 256 caractères.")
+        gender, birth_date = validate_profile(gender, birth_date)
+        photo_type = profile_photo_type(photo)
         salt = secrets.token_bytes(16)
         verifier = password_hash(password, salt)
         with closing(self.connect()) as db, db:
@@ -78,8 +112,11 @@ class Accounts:
             if first_admin and db.execute("SELECT 1 FROM users LIMIT 1").fetchone():
                 raise ValueError("Le serveur a déjà un administrateur.")
             try:
-                db.execute("INSERT INTO users (id, username, admin, salt, verifier, model_count) VALUES (?, ?, ?, ?, ?, 0)",
-                           (uuid4().hex, username, int(first_admin), salt, verifier))
+                db.execute("""INSERT INTO users
+                    (id, username, admin, salt, verifier, model_count, gender, birth_date, photo, photo_type)
+                    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)""",
+                    (uuid4().hex, username, int(first_admin), salt, verifier,
+                     gender or None, birth_date or None, photo or None, photo_type))
             except sqlite3.IntegrityError as error:
                 raise ValueError("Cet identifiant existe déjà.") from error
 
@@ -87,10 +124,31 @@ class Accounts:
         with closing(self.connect()) as db:
             return db.execute("SELECT id, username, admin FROM users ORDER BY username").fetchall()
 
+    def profile_photo(self, account_id):
+        with closing(self.connect()) as db:
+            return db.execute("SELECT photo, photo_type FROM users WHERE id=? AND photo IS NOT NULL",
+                              (account_id,)).fetchone()
+
+    def update_profile(self, account_id, gender, birth_date, *, photo=None, remove_photo=False):
+        gender, birth_date = validate_profile(gender, birth_date)
+        if photo and remove_photo:
+            raise ValueError("Choisissez de remplacer ou de supprimer la photo.")
+        photo_type = profile_photo_type(photo)
+        with closing(self.connect()) as db, db:
+            if photo or remove_photo:
+                result = db.execute("UPDATE users SET gender=?, birth_date=?, photo=?, photo_type=? WHERE id=?",
+                                    (gender, birth_date, photo or None, photo_type, account_id))
+            else:
+                result = db.execute("UPDATE users SET gender=?, birth_date=? WHERE id=?",
+                                    (gender, birth_date, account_id))
+            if not result.rowcount:
+                raise ValueError("Compte inconnu.")
+
     def statistics(self):
         with closing(self.connect()) as db:
             return db.execute("""
-                SELECT id, username, admin, login_count, last_login, active_seconds, reset_requested, model_count, model_groups
+                SELECT id, username, admin, login_count, last_login, active_seconds, reset_requested,
+                       model_count, model_groups, gender, birth_date, photo_type
                 FROM users ORDER BY username
             """).fetchall()
 
@@ -140,7 +198,8 @@ class Accounts:
         digest = self.token_digest(token)
         with closing(self.connect()) as db, db:
             user = db.execute("""
-                SELECT users.id, users.username, users.admin, users.must_change, sessions.last_seen FROM users
+                SELECT users.id, users.username, users.admin, users.must_change, users.gender,
+                       users.birth_date, users.photo_type, sessions.last_seen FROM users
                 JOIN sessions ON sessions.user_id=users.id
                 WHERE sessions.digest=? AND sessions.expires>?
             """, (digest, now)).fetchone()

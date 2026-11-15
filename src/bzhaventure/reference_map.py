@@ -7,12 +7,12 @@ from .analysis import pause_summary, summarize, terrain_breakdown
 from .gpx import describe_course, elapsed, read_gpx
 
 
-def reference_map(store, directory):
-    courses, skipped = [], []
+def reference_map(store, directory, *, calendar=False):
+    courses, skipped, seen = [], [], set()
     def load(data):
         course = read_gpx(BytesIO(data), timed=True)
         return course, pause_summary(BytesIO(data), course)
-    for source in store.reference_sources(directory, include_excluded=True):
+    for source in store.reference_sources(directory, include_excluded=not calendar):
         try:
             value, fingerprint, error, _ = store.load_reference(source, load)
             if error:
@@ -21,6 +21,13 @@ def reference_map(store, directory):
             duration = elapsed(course)
             if duration <= 0:
                 raise ValueError("Durée nulle")
+            start = datetime.fromtimestamp(course[0][1][0][3], timezone.utc).isoformat()
+            if calendar:
+                if fingerprint not in seen:
+                    seen.add(fingerprint)
+                    courses.append(dict(key=source["key"], name=source["name"], duration=duration,
+                                        distance=describe_course(course)["distance"], recordedStart=start))
+                continue
             step = max(1, ceil(sum(len(points) for _, points, _ in course)/1500))
             trace = []
             for _, points, _ in course:
@@ -33,7 +40,7 @@ def reference_map(store, directory):
                                 trace=trace, classification=describe_course(course),
                                 summary=summarize(course), duration=duration, pauses=pauses, terrain=terrain,
                                 unassigned=max(0, duration - sum(row["actual"] for row in terrain)),
-                                recordedStart=datetime.fromtimestamp(course[0][1][0][3],timezone.utc).isoformat()))
+                                recordedStart=start))
         except (ValueError, OSError, TypeError) as error:
             skipped.append(source["name"]+" · "+str(error))
     return dict(courses=courses, skipped=skipped)

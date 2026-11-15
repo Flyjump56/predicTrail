@@ -15,7 +15,7 @@ class Node {
     this.value = '';
     this.hidden = false;
     this.disabled = false;
-    this.style = {};
+    this.style = {setProperty(name,value){this[name]=value;}};
     const classes=new Set();
     this.classList = {add(...values){values.forEach(v=>classes.add(v));},remove(...values){values.forEach(v=>classes.delete(v));},contains(value){return classes.has(value);}};
   }
@@ -69,6 +69,7 @@ const requests = [];
 const pending = [];
 let holdPredictions = false;
 let centralState=null;
+let savedPlanning={revision:null,planning:null};
 let activities = [
   {id:'one',name:'Course',kind:'running',source:'gpx',distance:20000,date:'2026-05-01',reference:1,profile:'flat',distanceClass:'short'},
   {id:'two',name:'Vélo',kind:'cycling',source:'garmin',distance:30000,date:'2026-05-02',reference:0,profile:'mountain',distanceClass:'short'},
@@ -93,6 +94,12 @@ async function fetch(url,request={}) {
   requests.push({url,request});
   let data;
   if(url==='/api/state') {if(request.method==='POST'){centralState=JSON.parse(request.body).state;data={saved:true};}else data={state:centralState};}
+  else if(url==='/api/planning') {
+    if(request.method==='POST') savedPlanning={revision:'test',planning:JSON.parse(request.body).planning};
+    data=savedPlanning;
+  }
+  else if(url==='/api/planning/references') data={courses:[{key:'one',name:'Trail historique',recordedStart:'2027-05-10T12:00:00Z',distance:12000,duration:5000}],skipped:[]};
+  else if(url.startsWith('/api/planning/print?')) return {ok:true,text:async()=>'<h1>Aperçu</h1>'};
   else if(url==='/api/backup/list')data={backups:[]};
   else if(url==='/api/backup/create'){centralState=JSON.parse(request.body).state;data={token:'a'.repeat(32),name:'PredicTrail-test.zip',url:'/api/backup/download?token='+ 'a'.repeat(32),bytes:100};}
   else if(url==='/api/backup/inspect')data={token:'a'.repeat(32),version:'3.0.0',createdAt:'2026-11-08T07:00:00Z',files:4};
@@ -126,15 +133,107 @@ class FileReader {
 }
 const savedRuns=new Map();
 const localStorage={getItem:key=>savedRuns.get(key)||null,setItem:(key,value)=>savedRuns.set(key,value)};
-const context = {localStorage,document,window:{addEventListener(){},confirm:()=>true},fetch,FileReader,console,
+const context = {localStorage,document,window:{addEventListener(){},confirm:()=>true},fetch,FileReader,console,URLSearchParams,
   Blob,atob,URL:{createObjectURL:()=> 'blob:qa-gpx',revokeObjectURL(){}},
   clearTimeout(){},setTimeout(){},requestAnimationFrame:()=>1,cancelAnimationFrame(){}};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/bzhaventure/web/app.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/bzhaventure/web/backup.js'),'utf8'),context);
+for (const [id, fields] of Object.entries({
+  'planning-goal':['name','date','trace','removeTrace'],
+  'planning-session':['date','type','minutes','repeat','note'],
+  'planning-type':['existing','name','minutes'],
+  'planning-template':['template','scale'],
+  'planning-print-form':['start','end','layout','zone','offset'],
+})) {
+  const elements = Object.fromEntries(fields.map(name=>[name,new Node('input')]));
+  get(id).elements = {...elements, namedItem:name=>elements[name]};
+}
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/bzhaventure/web/planning.js'),'utf8'),context);
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function settle() { for(let i=0;i<8;i++) await tick(); }
 async function run() {
+  const printForm = get('planning-print-form');
+  assert.equal(printForm.action,'/api/planning/print');
+  printForm.elements.start.value='2027-05-11';
+  printForm.elements.end.value='2027-05-10';
+  let blocked = false;
+  printForm.events.submit({preventDefault(){blocked=true;}});
+  assert(blocked);
+  assert(get('planning-print-error').textContent.includes('dans l’ordre'));
+  printForm.elements.end.value='2027-05-17';
+  blocked = false;
+  await printForm.events.submit({preventDefault(){blocked=true;}});
+  assert(blocked);
+  assert.equal(get('planning-print-frame').srcdoc,'<h1>Aperçu</h1>');
+  assert(!get('planning-print-preview').hidden);
+  get('planning-print-close').events.click();
+  assert(get('planning-print-preview').hidden);
+  savedPlanning.planning={types:[{name:'Course',minutes:60}],sessions:[],goal:{name:'Objectif',date:'2027-05-10'}};
+  await vm.runInContext('loadPlanning()',context);
+  await settle();
+  assert(Number.isFinite(Number(get('planning-quick-types').children[0].style['--planning-type-hue'])));
+  assert(get('planning-selected-sessions').children[0].children[0].textContent.includes('Trail historique'));
+  get('planning-selected-sessions').children[0].children[0].events.click();
+  await settle();
+  assert(!get('screen-map').hidden);
+  assert.equal(get('reference-course-select').value,'one');
+  assert(!get('reference-course-details').hidden);
+  vm.runInContext('selectReferenceCourse(null)',context);
+  get('tab-analysis').events.click();
+  await get('planning-quick-types').children[0].events.click();
+  assert.equal(savedPlanning.planning.sessions.length,1);
+  assert.equal(savedPlanning.planning.sessions[0].date,'2027-05-10');
+  await get('planning-selected-sessions').children[0].children[2].events.click();
+  assert.equal(savedPlanning.planning.sessions.length,0);
+  await get('planning-quick-types').children[0].events.click();
+  get('planning-view-year').events.click();
+  assert.equal(get('planning-view-year').attributes['aria-pressed'],'true');
+  assert.equal(get('planning-year-view').children.length,12);
+  assert(get('planning-year-view').children[4].children.some(node=>node.textContent.includes('1 course(s) de référence')));
+  get('planning-year-view').children[4].children[0].events.click();
+  assert.equal(get('planning-view-month').attributes['aria-pressed'],'true');
+  assert.equal(get('planning-days').rows[0].children[0].textContent,'17');
+  assert.equal(vm.runInContext("planningWeekNumber(planningDay('2021-01-01'))",context),53);
+  assert.equal(vm.runInContext("planningWeekNumber(planningDay('2021-01-04'))",context),1);
+  get('planning-next').events.click();
+  await get('planning-quick-types').children[0].events.click();
+  get('planning-prev').events.click();
+  get('planning-jump-goal').events.click();
+  await get('planning-delete-week').events.click();
+  assert.equal(savedPlanning.planning.sessions.length,1);
+  assert.equal(savedPlanning.planning.sessions[0].date,'2027-06-01');
+  await get('planning-delete-all').events.click();
+  assert.equal(savedPlanning.planning.sessions.length,0);
+  assert.equal(savedPlanning.planning.goal.name,'Objectif');
+  assert(get('planning-selected-sessions').children[0].children[0].textContent.includes('Trail historique'));
+  const sessions = vm.runInContext("generatePreparation('2027-04-11',trailWeeks,0.5,[])",context);
+  assert(sessions.length > 50);
+  assert(sessions.every(item=>item.date < '2027-04-11'));
+  assert(sessions.every(item=>item.goalOffset < 0));
+  assert(sessions.some((item,i)=>i > 0 && item.date===sessions[i-1].date));
+  assert(sessions.some(item=>item.type==='Course à pied' && item.minutes===45));
+  savedPlanning.planning.sessions=[
+    {type:'Course',date:'2027-05-08',minutes:30,note:'',goalOffset:-2},
+    {type:'Course',date:'2027-05-09',minutes:40,note:''}
+  ];
+  savedPlanning.planning.sessions[0].note='Échauffement 15 min\nPuis 3 répétitions';
+  await vm.runInContext('loadPlanning()',context);
+  const weekRows = get('planning-days').rows;
+  const training = weekRows.flatMap(row=>row.children).flatMap(cell=>cell.children)
+    .find(node=>node.title === 'Échauffement 15 min\nPuis 3 répétitions');
+  assert(training);
+  training.events.click();
+  assert.equal(get('planning-session').elements.note.value,'Échauffement 15 min\nPuis 3 répétitions');
+  assert(get('planning-selected-sessions').children[0].children.some(node=>node.className==='planning-session-instructions'));
+  const goalForm = get('planning-goal').elements;
+  goalForm.trace.files=[];
+  goalForm.date.value='2027-05-17';
+  get('planning-goal').events.submit({preventDefault(){}});
+  await settle();
+  assert.equal(savedPlanning.planning.sessions[0].date,'2027-05-15');
+  assert.equal(savedPlanning.planning.sessions[0].goalOffset,-2);
+  assert.equal(savedPlanning.planning.sessions[1].date,'2027-05-09');
   await vm.runInContext(`(async () => {
     const pending = [];
     const job = processGpxFiles(['A','B','C'].map(name => ({name})),file =>

@@ -267,6 +267,7 @@ function showSegmentation(container, classification) {
 // Catalogue affiché et sélection explicite du modèle d'analyse.
 let availableModels;
 function updatePersonalModelChoices(data) {
+  updateAccountCourseStats(data.courses);
   const previousPrediction = $('prediction-model').value;
   $('prediction-model').replaceChildren();
   for (const [value,label] of [['auto','Sélection automatique selon le parcours'],
@@ -296,6 +297,14 @@ function updatePersonalModelChoices(data) {
     $('simulation-model').value=previousSimulationModel;
   }
   if(typeof restoreDeferredChoices==='function')restoreDeferredChoices();
+}
+function updateAccountCourseStats(courses) {
+  if (!hostedAccount) return;
+  const status = $('account-course-stats');
+  if (status) status.textContent = courses
+    ? courses.length+' course'+(courses.length === 1 ? ' analysée' : 's analysées')+
+      ' · '+km(courses.reduce((sum,course)=>sum+course.distance,0))+' au total'
+    : 'Bilan des courses indisponible';
 }
 function showModelCatalog(data) {
   availableModels = [data.model,...data.models,data.inclinationModel];
@@ -1100,6 +1109,7 @@ async function followStartup() {
     $('retry-validation').hidden = startup.status !== 'error';
     if (startup.status === 'error' || startup.status === 'empty') {
       startupReady = false;
+      updateAccountCourseStats(startup.status === 'empty' ? [] : null);
       updatePredictionMode();
       $('startup-message').classList[startup.status === 'error' ? 'add' : 'remove']('error');
       if (!referenceViewAccount) {
@@ -1384,20 +1394,22 @@ function showScreen(name) {
   $('screen-map').hidden = name !== 'map';
   $('screen-conversion').hidden = name !== 'conversion';
   $('screen-backups').hidden = name !== 'backups';
+  $('screen-planning').hidden = name !== 'planning';
   if (typeof pauseSimulation === 'function') pauseSimulation();
-  for (const screen of ['analysis','references','map','simulations','conversion','backups']) {
+  for (const screen of ['analysis','references','map','simulations','conversion','backups','planning']) {
     $('tab-'+screen).setAttribute('aria-current',screen === name ? 'page' : 'false');
   }
   if (name === 'analysis') refreshMapSize();
   if (name === 'conversion' && conversionView) conversionView.resize();
   if (name === 'simulations') renderRuns();
   if (name === 'map') loadReferenceMap();
+  if (name === 'planning' && typeof loadPlanning === 'function') loadPlanning();
   if (name === 'references') {
     if (referenceViewAccount || (startupReady && referenceDataScope !== '')) showReferences();
     else if (!startupReady) loadReferenceMap();
   }
 }
-for (const name of ['analysis','references','map','simulations','conversion','backups']) {
+for (const name of ['analysis','references','map','simulations','conversion','backups','planning']) {
   $('tab-'+name).addEventListener('click',() => showScreen(name));
 }
 $('reference-sort').addEventListener('change',showReferences);
@@ -1408,7 +1420,7 @@ function updateReferenceViewControls() {
   $('reference-export-controls').hidden = foreign;
   $('reference-model-panel').hidden = currentScreen !== 'references' || referenceDataScope !== referenceViewAccount;
 }
-function changeReferenceView(account) {
+function changeReferenceView(account, reload = true) {
   referenceViewAccount = account;
   referenceDataScope = null;
   referenceListRequest++;
@@ -1434,8 +1446,10 @@ function changeReferenceView(account) {
     progress.querySelector('progress').hidden = true;
     progress.querySelector('span').textContent = 'Chargement du suivi…';
   }
-  if (currentScreen === 'map') loadReferenceMap();
-  else showReferences();
+  if (reload) {
+    if (currentScreen === 'map') loadReferenceMap();
+    else showReferences();
+  }
 }
 if (hostedAccount && $('admin-reference-references')) {
   for (const screen of ['references','map']) {
@@ -1830,6 +1844,11 @@ async function loadReferenceMap() {
   } catch(error) { if (version===mapRequest) $('reference-map-status').textContent=error.message; }
 }
 let selectedReferenceKey=null;
+function openOwnReferenceOnMap(key) {
+  if (referenceViewAccount) changeReferenceView('',false);
+  selectedReferenceKey = key;
+  showScreen('map');
+}
 function showReferenceCourseInfo(course) {
   $('reference-course-details').hidden=!course;
   const analysisPanel = $('reference-course-analysis');

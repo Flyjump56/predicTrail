@@ -27,9 +27,113 @@
 <button class="button" id="tab-conversion">⇄ Conversion GPX</button>
 <button class="button" id="tour-open">ⓘ Découvrir les fonctionnalités</button>
 <button class="button" id="tab-backups">⇩ Sauvegarde et restauration</button>
+<button class="button" id="tab-planning">Planning de préparation</button>
 <!-- admin-navigation -->
 </nav>
 <main>
+<section id="screen-planning" hidden aria-labelledby="planning-title">
+  <h2 id="planning-title">Planning de préparation</h2>
+  <p id="planning-status" role="status"></p>
+  <div class="controls">
+    <button class="button" id="planning-reload" type="button">Recharger le planning</button>
+    <a class="button" id="planning-export" download="PredicTrail-planning.xlsx">Exporter en Excel</a>
+  </div>
+  <details open>
+    <summary>Impression du planning</summary>
+    <form id="planning-print-form" class="controls" method="get">
+      <label>Date de début <input type="date" name="start" required></label>
+      <label>Date de fin <input type="date" name="end" required></label>
+      <label>Présentation <select name="layout"><option value="list">Liste détaillée</option><option value="calendar">Calendrier</option></select></label>
+      <input type="hidden" name="zone"><input type="hidden" name="offset">
+      <button class="button" type="submit">Imprimer le planning</button>
+    </form>
+    <p id="planning-print-error" role="status"></p>
+    <div id="planning-print-preview" hidden>
+      <button class="button" id="planning-print-close" type="button">Fermer l’aperçu</button>
+      <iframe id="planning-print-frame" title="Aperçu du planning à imprimer" sandbox="allow-scripts allow-modals"></iframe>
+    </div>
+  </details>
+  <fieldset id="planning-controls" disabled>
+    <legend>Préparation de la course</legend>
+    <details open><summary>Course objectif</summary>
+      <form id="planning-goal" class="controls">
+        <label>Nom de la course <input name="name" required maxlength="120"></label>
+        <label>Date <input name="date" type="date" required></label>
+        <label>Trace GPX <input name="trace" type="file" accept=".gpx,application/gpx+xml"></label>
+        <label><input name="removeTrace" type="checkbox"> Détacher la trace</label>
+        <button class="button" type="submit">Enregistrer la course</button>
+        <button class="button" id="planning-delete-goal" type="button">Retirer la course</button>
+      </form>
+      <p id="planning-goal-info"></p>
+    </details>
+    <details><summary>Assistant de création de plan</summary>
+      <form id="planning-template" class="controls">
+        <label>Plan
+          <select name="template">
+            <option value="12">Trail long · 12 semaines</option>
+            <option value="4">Préparation courte · 4 semaines</option>
+            <option value="0">Planning libre</option>
+          </select>
+        </label>
+        <label>Durée des séances <select name="scale"><option value=".5">50 %</option><option value=".75">75 %</option><option value="1" selected>100 %</option><option value="1.25">125 %</option></select></label>
+        <button class="button" type="submit">Prévisualiser</button>
+        <button class="button" id="planning-apply-template" type="button" disabled>Ajouter au calendrier</button>
+      </form>
+      <p id="planning-preview"></p>
+      <p class="muted">La course est le jour J. Si sa date change, les séances du plan se décalent avec elle. Une séance déplacée manuellement reste à la date choisie.</p>
+    </details>
+    <div class="controls planning-month-controls">
+      <div class="planning-view-toggle" role="group" aria-label="Vue du calendrier">
+        <button class="button" id="planning-view-month" type="button" aria-pressed="true">Mois</button>
+        <button class="button" id="planning-view-year" type="button" aria-pressed="false">Année</button>
+      </div>
+      <button class="button" id="planning-prev" type="button">‹ Mois précédent</button>
+      <button class="button" id="planning-today" type="button">Aujourd’hui</button>
+      <button class="button" id="planning-next" type="button">Mois suivant ›</button>
+      <h3 id="planning-month"></h3>
+      <button class="button" id="planning-jump-goal" type="button">Aller à la course</button>
+    </div>
+    <div class="scroll" id="planning-month-view">
+      <table class="planning-calendar" aria-labelledby="planning-month">
+        <thead><tr><th scope="col" class="planning-week-number">Sem.</th><th scope="col">Lun.</th><th scope="col">Mar.</th><th scope="col">Mer.</th><th scope="col">Jeu.</th><th scope="col">Ven.</th><th scope="col">Sam.</th><th scope="col">Dim.</th></tr></thead>
+        <tbody id="planning-days"></tbody>
+      </table>
+    </div>
+    <div id="planning-year-view" class="planning-year" hidden></div>
+    <p id="planning-year-legend" class="muted" hidden>Points de couleur par type de séance · <span class="mini-reference">Course de référence (souligné)</span> · <span class="mini-goal">Course objectif</span></p>
+    <p id="planning-reference-status" class="muted" role="status"></p>
+    <div class="controls planning-week-actions">
+      <p id="planning-week"></p>
+      <button class="button planning-danger" id="planning-delete-week" type="button">Supprimer les entraînements de la semaine</button>
+    </div>
+    <div class="planning-quick">
+      <h3 id="planning-selected-day"></h3>
+      <div id="planning-quick-types" class="controls" aria-label="Ajouter une séance à la date sélectionnée"></div>
+      <ul id="planning-selected-sessions"></ul>
+      <button class="button planning-danger" id="planning-delete-all" type="button">Supprimer tous les entraînements</button>
+    </div>
+    <details id="planning-session-details" open><summary>Séance et répétition</summary>
+      <form id="planning-session" class="controls">
+        <label>Date <input name="date" type="date" required></label>
+        <label>Type <select name="type" required></select></label>
+        <label>Durée en minutes <input name="minutes" type="number" min="0" max="1440" required></label>
+        <label>Nombre de semaines <input name="repeat" type="number" min="1" max="52" value="1" required></label>
+        <label>Instructions de la séance <textarea name="note" rows="3" maxlength="500" placeholder="Échauffement, exercices, intensité, récupération…"></textarea></label>
+        <button class="button" type="submit">Enregistrer la séance</button>
+        <button class="button" id="planning-new-session" type="button">Nouvelle séance</button>
+        <button class="button" id="planning-delete-session" type="button" hidden>Supprimer la séance</button>
+      </form>
+    </details>
+    <details><summary>Types de séances et durées par défaut</summary>
+      <form id="planning-type" class="controls">
+        <label>Type à modifier <select name="existing"></select></label>
+        <label>Libellé <input name="name" maxlength="80" required></label>
+        <label>Durée en minutes <input name="minutes" type="number" min="0" max="1440" required></label>
+        <button class="button" type="submit">Enregistrer le type</button>
+      </form>
+    </details>
+  </fieldset>
+</section>
 <section id="screen-backups" hidden aria-labelledby="backups-title"><h2 id="backups-title">Sauvegarder et restaurer mes données</h2>
 <p>Archive complète : GPX de référence et parcours conservés, imports Garmin, sélections, modèles, scénarios et réglages. Les mots de passe et sessions Garmin ne sont pas sauvegardés. Conservez une copie du ZIP sur un autre support.</p>
 <div class="controls"><button id="backup-create" class="button">Créer une sauvegarde complète</button><button id="backup-select" class="button">Sélectionner une sauvegarde ZIP</button><input id="backup-file" type="file" accept=".zip,application/zip" hidden><button id="backup-restore" class="button" disabled>Restaurer les données</button><button id="resume-analysis" class="button">Reprendre le dernier parcours</button></div>
@@ -367,5 +471,6 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 <script src="/assets/app.js"></script>
 <script src="/assets/backup.js"></script>
+<script src="/assets/planning.js"></script>
 </body>
 </html>

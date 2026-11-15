@@ -3,7 +3,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 import base64
 import binascii
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
 import uuid
 import json
@@ -20,6 +21,8 @@ from .gpx_import import convert_gpx, MAX_SOURCE
 from .gpx import describe_course, elapsed, read_gpx, resample_course
 from .models import fit
 from .prediction import predict
+from .planning import planning_date, read_planning, save_planning
+from .planning_report import planning_print, planning_xlsx, report_rows
 from .export import export_points
 from .recorded import recorded_run, recorded_sections
 from .strategy import apply_strategy
@@ -45,6 +48,7 @@ STATIC_FILES = {
     "/assets/theme.jpg": (LOGO.parent / "thème.jpg", "image/jpeg"),
     "/assets/styles.css": (WEB_DIR / "styles.css", "text/css; charset=utf-8"),
     "/assets/backup.js": (WEB_DIR / "backup.js", "text/javascript; charset=utf-8"),
+    "/assets/planning.js": (WEB_DIR / "planning.js", "text/javascript; charset=utf-8"),
     "/assets/app.js": (WEB_DIR / "app.js", "text/javascript; charset=utf-8"),
     "/assets/admin-progress.js": (WEB_DIR / "admin-progress.js", "text/javascript; charset=utf-8"),
 }
@@ -96,11 +100,13 @@ class Dashboard(BaseHTTPRequestHandler):
         if self.path != "/api/startup":
             super().log_request(code, size)
 
-    def reply(self, body, content_type, status=200):
+    def reply(self, body, content_type, status=200, *, attachment=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if attachment is not None:
+            self.send_header("Content-Disposition", f'attachment; filename="{attachment}"')
         self.end_headers()
         self.wfile.write(body)
 
@@ -123,14 +129,24 @@ class Dashboard(BaseHTTPRequestHandler):
             return False
         return True
 
+    def retain_gpx(self, store, body):
+        key = digest(body)
+        directory = store.path.parent / "parcours-importes"
+        directory.mkdir(exist_ok=True)
+        path = directory / (key + ".gpx")
+        if not path.exists():
+            temporary = directory / (uuid.uuid4().hex + ".tmp")
+            try:
+                temporary.write_bytes(body)
+                temporary.replace(path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        return key
+
     def send_prediction(self,payload,body,options):
         store=getattr(self.runtime_context,"store",None)
         if store and options.get("retainSource"):
-            key=digest(body);directory=store.path.parent/"parcours-importes";directory.mkdir(exist_ok=True)
-            path=directory/(key+".gpx")
-            if not path.exists():
-                temporary=directory/(uuid.uuid4().hex+".tmp");temporary.write_bytes(body);temporary.replace(path)
-            payload["sourceId"]=key
+            payload["sourceId"] = self.retain_gpx(store, body)
         self.send_json(payload)
 
     def backups(self):
@@ -145,6 +161,58 @@ class Dashboard(BaseHTTPRequestHandler):
         if parsed.path=="/api/backup/list":
             try:self.send_json(dict(backups=self.backups().list_backups(),automatic=getattr(self.runtime_context,"backup_state",None)))
             except ValueError as error:self.send_json(dict(error=str(error)),503)
+        elif parsed.path == "/api/planning":
+            store = getattr(self.runtime_context, "store", None)
+            if store is None:
+                self.send_json(dict(error="Stockage en cours d’initialisation."), 503)
+            else:
+                self.send_json(read_planning(store))
+        elif parsed.path in ("/api/planning/export", "/api/planning/print"):
+            store = getattr(self.runtime_context, "store", None)
+            if store is None:
+                self.send_json(dict(error="Stockage en cours d’initialisation."), 503)
+                return
+            parameters = parse_qs(parsed.query)
+            printing = parsed.path.endswith("/print")
+            start = end = None
+            layout = "list"
+            if printing:
+                try:
+                    start = date.fromisoformat(planning_date(parameters.get("start", [None])[0]))
+                    end = date.fromisoformat(planning_date(parameters.get("end", [None])[0]))
+                    layout = parameters.get("layout", ["list"])[0]
+                    if start > end or layout not in ("list", "calendar") or (
+                            layout == "calendar" and (end - start).days >= 366):
+                        raise ValueError("Période ou format incorrect. La vue calendrier accepte jusqu’à 366 jours.")
+                except ValueError as error:
+                    self.send_json(dict(error=str(error)), 400)
+                    return
+            name = parameters.get("zone", ["UTC"])[0]
+            try:
+                zone = ZoneInfo(name) if len(name) <= 80 else timezone.utc
+            except (ValueError, ZoneInfoNotFoundError):
+                try:
+                    offset = max(-720, min(840, int(parameters.get("offset", ["0"])[0])))
+                except ValueError:
+                    offset = 0
+                zone = timezone(timedelta(minutes=offset))
+            plan = read_planning(store)["planning"] or {}
+            references = reference_map(store, self.reference_directory, calendar=True)["courses"]
+            rows, recap = report_rows(plan, references, zone, start=start, end=end)
+            if not printing:
+                self.reply(planning_xlsx(rows, recap, plan.get("types", [])),
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           attachment="PredicTrail-planning.xlsx")
+            else:
+                embedded = parameters.get("embedded", [""])[0] == "1"
+                self.reply(planning_print(rows, recap, str(zone), start, end, layout, embedded=embedded),
+                           "text/html; charset=utf-8")
+        elif parsed.path == "/api/planning/references":
+            store = getattr(self.runtime_context, "store", None)
+            if store is None:
+                self.send_json(dict(error="Stockage en cours d’initialisation."), 503)
+            else:
+                self.send_json(reference_map(store, self.reference_directory, calendar=True))
         elif parsed.path=="/api/state":
             store=getattr(self.runtime_context,"store",None)
             self.send_json(dict(state=store.get_app_state()) if store else dict(error="Stockage en cours d’initialisation."),200 if store else 503)
@@ -311,7 +379,30 @@ class Dashboard(BaseHTTPRequestHandler):
             self.send_json({"error": str(error)}, 400)
 
     def manage(self, path, options):
-        if path=="/api/state":
+        if path in ("/api/planning", "/api/planning/trace"):
+            store = getattr(self.runtime_context, "store", None)
+            if store is None:
+                self.send_json(dict(error="Stockage en cours d’initialisation."), 503)
+                return
+            if not self.runtime_context.update_lock.acquire(blocking=False):
+                self.send_json(dict(error="Une mise à jour est en cours. Réessayez ensuite."), 409)
+                return
+            try:
+                if path == "/api/planning/trace":
+                    body = base64.b64decode(options.get("gpx", ""), validate=True)
+                    if len(body) > MAX_UPLOAD:
+                        raise ValueError("Trace GPX limitée à 20 Mio après conversion.")
+                    checked, _ = convert_gpx(body, "original")
+                    self.send_json(dict(sourceId=self.retain_gpx(store, checked)))
+                else:
+                    result = save_planning(store, options)
+                    if result is None:
+                        self.send_json(dict(error="Le planning a changé sur un autre écran. Rechargez-le avant de poursuivre."), 409)
+                    else:
+                        self.send_json(result)
+            finally:
+                self.runtime_context.update_lock.release()
+        elif path=="/api/state":
             if not self.runtime_context.update_lock.acquire(blocking=False):raise ValueError("Une mise à jour est en cours. Réessayez après sa fin.")
             try:self.runtime_context.store.save_app_state(options.get("state"));self.send_json(dict(saved=True))
             finally:self.runtime_context.update_lock.release()

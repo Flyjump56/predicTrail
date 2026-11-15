@@ -144,7 +144,7 @@ class Backups:
             with closing(sqlite3.connect(incoming)) as db:
                 db.execute("PRAGMA trusted_schema=OFF")
                 if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok":raise ValueError("Base de sauvegarde endommagée.")
-                expected={"activities","reference_selection","reference_cache","model_cache","activity_profiles","app_state"}
+                expected={"activities","reference_selection","reference_cache","model_cache","activity_profiles","app_state","training_planning"}
                 objects=db.execute("SELECT type,name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").fetchall()
                 if any(kind in ("view","trigger") or (kind=="table" and name not in expected) for kind,name in objects):
                     raise ValueError("Structure SQLite inattendue.")
